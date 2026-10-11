@@ -1,4 +1,4 @@
-const { app, ipcMain, dialog } = require('electron');
+const { app, ipcMain, dialog, desktopCapturer, session } = require('electron');
 const { spawn, execFile, execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
@@ -937,9 +937,81 @@ async function runPreview(sender, job) {
   return { ok: result.ok, cancelled, output: result.ok ? outPath : null };
 }
 
+// ---------- 屏幕录制（分块写盘 / 转 MP4） ----------
+
+// getDisplayMedia 授权：渲染进程在来源选择弹窗里选定后，先经 ffgui:prepareDesktopSource
+// 登记来源 id，紧接着调用 getDisplayMedia，这里按登记授予对应来源。
+// （Electron 的 useSystemPicker 仅 macOS 15+ 有效，Windows/Linux 必须由 handler
+// 提供 desktopCapturer 来源；系统声音用 'loopback' 回环采集，仅 Windows/Linux 有效，
+// macOS 无系统级回环，只能录麦克风）
+let pendingDesktopSourceId = null;
+
+function registerDisplayMediaHandler() {
+  session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
+    (async () => {
+      if (!request.frame || !pendingDesktopSourceId) return null;
+      const sources = await desktopCapturer.getSources({ types: ['screen', 'window'] });
+      return sources.find((s) => s.id === pendingDesktopSourceId) || null;
+    })()
+      .then((src) => {
+        pendingDesktopSourceId = null;
+        if (!src) return callback(null);
+        const streams = { video: src };
+        // 'loopback' 系统声音回环仅 Windows 支持（Electron 文档明确），macOS/Linux 不授予
+        if (request.audioRequested && process.platform === 'win32') {
+          streams.audio = 'loopback';
+        }
+        console.log(`[ffgui] getDisplayMedia 授权: ${src.id}`
+          + (streams.audio ? '，含系统声音回环' : '，无系统声音'));
+        callback(streams);
+      })
+      .catch(() => {
+        pendingDesktopSourceId = null;
+        callback(null);
+      });
+  });
+}
+
+// 录制输出流：path -> WriteStream。渲染进程 MediaRecorder 按 1s 分块经 IPC 流式追加，
+// 每次 write 等回调返回（背压），长录制不会撑爆内存
+const recordStreams = new Map();
+
+// 录制结果转 MP4：视频流无损复制（VP9 封装进 MP4），Opus 重封装为 AAC（MP4 不支持 Opus）
+async function runRecordRemux(sender, input) {
+  cancelled = false;
+  const send = (evt) => {
+    if (!sender.isDestroyed()) sender.send('ffgui:convert-event', evt);
+  };
+  const probe = await probeFile(input);
+  if (!probe.hasVideo) {
+    send({ type: 'file-error', index: 0, input, error: '录制文件中没有视频流，无法转 MP4' });
+    return { done: 0, cancelled: false, output: null };
+  }
+  const outPath = buildOutputPath(input, null, 'mp4');
+  const args = ['-hide_banner', '-y', '-i', input, '-c:v', 'copy'];
+  if (probe.hasAudio) {
+    args.push('-c:a', 'aac', '-b:a', '128k');
+  } else {
+    args.push('-an');
+  }
+  args.push('-nostats', '-progress', 'pipe:1', outPath);
+  const result = await runFfmpegTask({
+    args,
+    index: 0,
+    label: input,
+    output: outPath,
+    getDuration: () => probe.duration,
+    send,
+    taskName: '转 MP4',
+  });
+  return { done: result.ok ? 1 : 0, cancelled, output: result.ok ? outPath : null };
+}
+
 // ---------- IPC ----------
 
 function registerIpc() {
+  registerDisplayMediaHandler();
+
   ipcMain.handle('ffgui:getCapabilities', () => getCapabilities());
 
   // 删除能力缓存文件，下次调用 getCapabilities 时重新探测
@@ -1019,6 +1091,115 @@ function registerIpc() {
     }
     console.log(`[ffgui] 已保存截图: ${res.filePath}`);
     return res.filePath;
+  });
+
+  // ---------- 屏幕录制 ----------
+  // 渲染进程 getDisplayMedia + MediaRecorder 采集编码（WebM），分块流式写入主进程
+
+  // 输出位置：默认「视频/record_时间戳.webm」
+  ipcMain.handle('ffgui:recordPickOutput', async (event) => {
+    const win = require('electron').BrowserWindow.fromWebContents(event.sender);
+    const d = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const ts = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`
+      + `-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+    const res = await dialog.showSaveDialog(win, {
+      title: '选择录制输出位置',
+      defaultPath: path.join(app.getPath('videos'), `record_${ts}.webm`),
+      filters: [{ name: 'WebM 视频', extensions: ['webm'] }],
+    });
+    return res.canceled || !res.filePath ? null : res.filePath;
+  });
+
+  // 开始录制写盘：显式创建输出流。同路径已有流则报错——配合渲染层的防重入，
+  // 杜绝两个录制写同一文件造成截断损坏
+  ipcMain.handle('ffgui:recordStart', (_event, targetPath) => {
+    if (recordStreams.has(targetPath)) {
+      throw new Error('该输出文件已在录制中，请先停止后再开始');
+    }
+    const stream = fs.createWriteStream(targetPath);
+    recordStreams.set(targetPath, stream);
+    console.log(`[ffgui] 录制写盘开始: ${targetPath}`);
+    return true;
+  });
+
+  // 追加一个录制分块；写流必须已由 recordStart 创建，绝不事后新建（'w' 会截断
+  // 已完成的文件）——停止后迟到的分块在这里被拒绝；write 回调返回前不 resolve（背压）
+  ipcMain.handle('ffgui:recordWriteChunk', (event, targetPath, buf) => new Promise((resolve, reject) => {
+    const stream = recordStreams.get(targetPath);
+    if (!stream) {
+      reject(new Error('录制输出流不存在（录制已结束或未开始）'));
+      return;
+    }
+    stream.write(Buffer.from(buf), (err) => {
+      if (err) {
+        recordStreams.delete(targetPath);
+        reject(err);
+      } else {
+        resolve(true);
+      }
+    });
+  }));
+
+  // 录制结束：关闭写流，返回文件大小
+  ipcMain.handle('ffgui:recordFinish', (event, targetPath) => new Promise((resolve) => {
+    const stream = recordStreams.get(targetPath);
+    const done = (ok) => {
+      let size = 0;
+      try {
+        size = fs.statSync(targetPath).size;
+      } catch {
+        // 文件不存在则按失败处理
+        ok = false;
+      }
+      if (ok) {
+        console.log(`[ffgui] 录制已保存: ${targetPath} (${(size / 1024 / 1024).toFixed(1)} MB)`);
+      }
+      resolve({ ok, path: targetPath, size });
+    };
+    if (!stream) {
+      done(false);
+      return;
+    }
+    recordStreams.delete(targetPath);
+    stream.once('error', () => done(false));
+    stream.end(() => done(true));
+  }));
+
+  // 取消 / 出错：丢弃半成品文件
+  ipcMain.handle('ffgui:recordDiscard', (_event, targetPath) => {
+    const stream = recordStreams.get(targetPath);
+    recordStreams.delete(targetPath);
+    if (stream) stream.destroy();
+    try {
+      fs.unlinkSync(targetPath);
+    } catch {
+      // 文件不存在（如尚未写入分块）则忽略
+    }
+    console.log(`[ffgui] 已丢弃未完成的录制: ${targetPath}`);
+    return true;
+  });
+
+  // 录制结果转 MP4（视频流复制 + 音频转 AAC；进度事件复用 convert-event）
+  ipcMain.handle('ffgui:recordRemux', (event, input) => runRecordRemux(event.sender, input));
+
+  // 来源选择弹窗用：枚举屏幕/窗口来源（含缩略图，data URL 直接给 <img>）
+  ipcMain.handle('ffgui:getDesktopSources', async () => {
+    const sources = await desktopCapturer.getSources({
+      types: ['screen', 'window'],
+      thumbnailSize: { width: 384, height: 216 },
+    });
+    return sources.map((s) => ({
+      id: s.id,
+      name: s.name,
+      thumb: s.thumbnail.isEmpty() ? '' : s.thumbnail.toDataURL(),
+    }));
+  });
+
+  // 渲染进程选定来源后、调用 getDisplayMedia 前登记 id，授权 handler 按此授予
+  ipcMain.handle('ffgui:prepareDesktopSource', (_event, id) => {
+    pendingDesktopSourceId = typeof id === 'string' ? id : null;
+    return true;
   });
 
   ipcMain.handle('ffgui:cancelConvert', () => {

@@ -42,6 +42,20 @@ contextBridge.exposeInMainWorld('ffgui', {
   makePreview: (job) => ipcRenderer.invoke('ffgui:makePreview', job),
   // 抓帧截图（主进程弹保存对话框，ffmpeg 从原文件抓一帧 PNG）
   captureFrame: (payload) => ipcRenderer.invoke('ffgui:captureFrame', payload),
+
+  // 屏幕录制（渲染进程 getDisplayMedia + MediaRecorder 采集编码，分块写入主进程）
+  recordPickOutput: () => ipcRenderer.invoke('ffgui:recordPickOutput'),
+  // 开始写盘：主进程显式创建输出文件流（同路径在录则报错，杜绝截断文件）
+  recordStart: (targetPath) => ipcRenderer.invoke('ffgui:recordStart', targetPath),
+  recordWriteChunk: (targetPath, buf) => ipcRenderer.invoke('ffgui:recordWriteChunk', targetPath, buf),
+  recordFinish: (targetPath) => ipcRenderer.invoke('ffgui:recordFinish', targetPath),
+  recordDiscard: (targetPath) => ipcRenderer.invoke('ffgui:recordDiscard', targetPath),
+  // 录制结果 WebM 转 MP4（视频流复制 + 音频转 AAC；进度事件复用 onConvertEvent）
+  recordRemux: (input) => ipcRenderer.invoke('ffgui:recordRemux', input),
+  // 来源选择弹窗：枚举屏幕/窗口来源（含缩略图）
+  getDesktopSources: () => ipcRenderer.invoke('ffgui:getDesktopSources'),
+  // 选定来源后登记 id，随后调 getDisplayMedia 即被授予该来源
+  prepareDesktopSource: (id) => ipcRenderer.invoke('ffgui:prepareDesktopSource', id),
   // 本地路径转 file:// URL（<video> 播放本地文件用）
   pathToFileUrl: (p) => {
     // Windows 路径：C:\path\to\file -> file:///C:/path/to/file

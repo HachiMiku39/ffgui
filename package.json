@@ -1,7 +1,7 @@
 {
   "name": "ffgui",
   "productName": "FFGui",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "main": "index.js",
   "scripts": {
     "test": "node --test scripts/regression.test.cjs",
@@ -11,7 +11,7 @@
   },
   "type": "commonjs",
   "license": "LGPL-3.0-or-later",
-  "description": "基于 FFmpeg 的桌面音视频工具箱（转码 / 合并 / 截取）",
+  "description": "基于 FFmpeg 的桌面音视频工具箱（转码 / 合并 / 截取 / 录屏）",
   "dependencies": {
     "electron-squirrel-startup": "^1.0.1"
   },

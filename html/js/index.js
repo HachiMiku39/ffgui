@@ -4,6 +4,7 @@
     convert: '音视频转码',
     merge: '音视频合并',
     clip: '音视频截取',
+    record: '屏幕录制',
   };
 
   const homeView = document.getElementById('home-view');
@@ -24,6 +25,10 @@
     }
     if (feature === 'clip') {
       window.location.href = 'clip.html';
+      return;
+    }
+    if (feature === 'record') {
+      window.location.href = 'record.html';
       return;
     }
     const name = FEATURE_NAMES[feature];

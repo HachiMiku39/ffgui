@@ -4,9 +4,9 @@
 
 ## 项目概览
 
-FFGui 是一个基于 Electron 的桌面音视频工具箱（GUI for FFmpeg），个人开源项目（LGPL-3.0-or-later），界面语言为简体中文。已实现三个功能：「音视频转码」「音视频合并」「音视频截取」（无损切 + 抓帧截图）。
+FFGui 是一个基于 Electron 的桌面音视频工具箱（GUI for FFmpeg），个人开源项目（LGPL-3.0-or-later），界面语言为简体中文。已实现四个功能：「音视频转码」「音视频合并」「音视频截取」（无损切 + 抓帧截图）「屏幕录制」。
 
-应用通过项目内置的 ffmpeg 执行实际处理：主进程负责探测 ffmpeg 能力（硬件加速 / 编码器 / 封装格式）并缓存、弹文件对话框、spawn ffmpeg 子进程并解析其 `-progress` 输出；渲染进程为纯静态 HTML/CSS/JS 页面。
+应用通过项目内置的 ffmpeg 执行实际处理：主进程负责探测 ffmpeg 能力（硬件加速 / 编码器 / 封装格式）并缓存、弹文件对话框、spawn ffmpeg 子进程并解析其 `-progress` 输出；渲染进程为纯静态 HTML/CSS/JS 页面。屏幕录制的采集与编码在渲染进程完成（系统选择器 + MediaRecorder），仅结果转 MP4 时走 ffmpeg。
 
 ## 技术栈
 
@@ -41,7 +41,7 @@ main/ffmpeg.js      主进程核心：
                       推送 file-start / progress / file-done / file-warning /
                       file-error 事件
                       （spawn/日志/进度解析封装在 runFfmpegTask，转码、合并、截取、
-                      预览共用）；设备预设（job.devicePreset，如 ipod4-540/720）
+                      预览、录屏转 MP4 共用）；设备预设（job.devicePreset，如 ipod4-540/720）
                       在主进程由 normalizeConvertJob 二次落实（不能被旧表单值
                       覆盖，须在分配输出扩展名前调用），锁定 MP4/libx264
                       Main 3.1/8-bit/最高 30 fps/AAC-LC 双声道 + VBV + faststart；
@@ -87,20 +87,49 @@ main/ffmpeg.js      主进程核心：
                       时间轴 1:1 对齐，截取与抓帧始终作用于原文件
                     - 抓帧截图（ffgui:captureFrame）：弹保存对话框后
                       ffmpeg -ss <t> -i <原文件> -frames:v 1 输出 PNG（原分辨率）
+                    - 录屏采集授权（registerDisplayMediaHandler，注册在 defaultSession）：
+                      Electron 的 useSystemPicker 仅 macOS 15+ 有效，Windows/Linux
+                      必须由 handler 授予 desktopCapturer 来源。渲染进程在来源选择
+                      弹窗里选定后先经 ffgui:prepareDesktopSource 登记来源 id，紧接着
+                      调用 getDisplayMedia，handler 按登记授予（video 为所选来源；
+                      audio 请求且 win32 时授予 'loopback' 系统声音回环——Electron
+                      文档明确仅 Windows 支持，macOS/Linux 无系统级回环，只能录
+                      麦克风；勾选须在选择来源前，页面有校验并在勾选后自动重开
+                      来源选择）
+                    - 录屏写盘：渲染进程 MediaRecorder 按 1s 分块经
+                      ffgui:recordWriteChunk 流式追加到主进程 fs.WriteStream
+                      （recordStreams 按路径存流，write 等回调实现背压）；
+                      recordStart 在开始录制时显式建流（同路径在录则报错），
+                      writeChunk 绝不事后新建（'w' 会截断已完成的文件），停止后
+                      迟到的分块会被拒绝；渲染层另有 starting/stopping/acceptChunks
+                      防重入与分块接收窗口，杜绝并发/迟到写入截断文件；
+                      recordPickOutput 弹保存对话框（默认 视频/record_<时间戳>.webm）；
+                      recordFinish 关流返回大小；recordDiscard 删半成品；
+                      recordRemux 把录制结果 WebM 转 MP4（-c:v copy 无损 +
+                      Opus 转 AAC，无音轨传 -an，复用 runFfmpegTask 进度事件）；
+                      getDesktopSources 枚举屏幕/窗口来源（含缩略图 data URL）
                     - IPC handler：ffgui:getCapabilities / clearCapsCache /
                       pickMediaFiles / pickDirectory / convert / cancelConvert /
                       probeMedia / merge / pickSubtitle / probeSubtitle /
-                      clip / makePreview / captureFrame
-                      （合并、截取、预览的进度与取消均复用 convert 的事件与 IPC）
+                      clip / makePreview / captureFrame /
+                      recordPickOutput / recordStart / recordWriteChunk /
+                      recordFinish / recordDiscard / recordRemux /
+                      getDesktopSources / prepareDesktopSource
+                      （合并、截取、预览、录屏转 MP4 的进度与取消均复用 convert
+                      的事件与 IPC）
 preload/preload.js  通过 contextBridge 暴露 window.ffgui（platform、versions、
                     getCapabilities、clearCapsCache、pickMediaFiles、pickDirectory、
                     getPathForFile、convert、cancelConvert、onConvertEvent、
                     probeMedia、merge、pickSubtitle、probeSubtitle、clip、
-                    makePreview、captureFrame、pathToFileUrl）
+                    makePreview、captureFrame、recordPickOutput、recordStart、
+                    recordWriteChunk、recordFinish、recordDiscard、recordRemux、
+                    getDesktopSources、prepareDesktopSource、pathToFileUrl）
 html/index.html     首页（功能导航卡片 + "清除硬件信息缓存"按钮）
 html/convert.html   转码页
 html/merge.html     合并页（队列拖动排序、混合队列黑屏段拼接、可拖入一个字幕文件）
 html/clip.html      截取页（CSP 额外放行 media-src blob: file: 以播放本地文件）
+html/record.html    录屏页（CSP 同 clip.html 另放行 img-src data: 展示来源缩略图；
+                    来源选择弹窗、声音勾选、实时预览、计时录制、结果一键转 MP4）
 html/js/index.js    首页视图切换与清缓存逻辑
 html/js/convert.js  转码页全部逻辑：候选格式/编码器清单是硬编码的，但会按主进程
                     探测到的真实能力过滤后填充下拉框；设备预设选中时锁定并填写
@@ -112,6 +141,14 @@ html/js/merge.js    合并页全部逻辑：字幕单槽位拖放（拖到拼接
 html/js/clip.js     截取页全部逻辑：原生 <video> 播放（不引第三方播放器库，库不增加
                     解码能力），起止双滑块 + 步进寻址 + 抓帧截图；播放 error 时调
                     makePreview 生成预览副本兜底，失败则判定无法预览、禁止截取
+html/js/record.js   录屏页全部逻辑：desktopCapturer 缩略图弹窗选来源 →
+                    prepareDesktopSource 登记 → getDisplayMedia 被授予该来源
+                    （系统声音为 'loopback' 回环音轨，仅 Windows）；记住 sourceId，
+                    勾选系统声音后按原来源静默重新采集（失效才重开弹窗）；
+                    系统声音与麦克风（getUserMedia）可选、双路混音走 AudioContext；
+                    MediaRecorder 输出 WebM（vp9 优先，画质档映射
+                    videoBitsPerSecond 8/4/2 Mbps），1s 分块串行写入主进程；
+                    录制中 beforeunload 拦截离开页面
 html/css/style.css  全部页面共用样式
 bin/ffmpeg.exe      内置的 ffmpeg（Windows），约 110MB；放置规则见 bin/README.md：
 bin/bin/ bin/lib/   macOS 为 bin/bin/ffmpeg + bin/lib/（自建预编译构建，来自
@@ -159,12 +196,14 @@ forge.config.js     Electron Forge 配置（含压缩钩子与 Fuses）
 - 全部注释与界面文案使用简体中文，提交/文档同样使用中文
 - 主进程/preload 为 CommonJS `require`；渲染进程脚本是无模块的 IIFE（HTML 有 CSP：
   `default-src 'self'; style-src 'self'; script-src 'self'`，禁止内联脚本与远程资源；
-  clip.html 额外放行 `media-src 'self' blob: file:`）
+  clip.html 与 record.html 额外放行 `media-src 'self' blob: file:`，
+  record.html 另放行 `img-src 'self' data:`（来源缩略图））
 - 渲染进程不得直接访问 Node API，一切跨进程能力走 `window.ffgui`（preload contextBridge）
 - ffmpeg 的日志走 stderr、进度走 stdout（`-progress pipe:1`），主进程按行解析；
   新增转码功能时应复用 `main/ffmpeg.js` 中 `runFfmpegTask` 的 spawn/解析模式
 - 输出文件名规则：与源文件同目录同格式时自动加 `_ffgui` 后缀避免覆盖源文件
-  （`main/ffmpeg.js` 的 `buildOutputPath`）；合并输出固定为 `merged_<时间戳>.<格式>`
+  （`main/ffmpeg.js` 的 `buildOutputPath`）；合并输出固定为 `merged_<时间戳>.<格式>`；
+  录屏输出固定为 `record_<时间戳>.webm`
 
 ## 安全注意事项
 
@@ -184,11 +223,15 @@ forge.config.js     Electron Forge 配置（含压缩钩子与 Fuses）
   `extraResource` 按构建平台条件配置，Windows / macOS 携带 `bin/`，Linux 不携带
 - forge.config.js 中不能出现 null 值（proxify 会崩溃），macOS 不签名靠省略 osxSign 实现
 - `package.json` 中 `allowScripts` 字段是非 npm 标准字段（模板残留），当前无实际作用
+- 录屏限制：系统声音走 'loopback' 回环，仅 Windows 支持（Electron 文档明确；
+  macOS/Linux 无系统级回环，只能录麦克风）；MediaRecorder 画质只能控码率
+  （无 CRF），帧率跟随屏幕；录屏与转码等任务沿用全局单任务假设（页面隔离保证不并发）
 
 ## 测试方式
 
 自动化回归使用 `npm test`，生成独立临时媒体并自动清理。手工验证方式：`npm start` 启动应用，使用 `test_media/` 下的示例文件走一遍
-转码流程（含拖拽添加、取消、进度显示），并在主进程控制台观察 `[ffgui]` / `[ffmpeg]` 日志。
+转码流程（含拖拽添加、取消、进度显示），并在主进程控制台观察 `[ffgui]` / `[ffmpeg]` 日志；
+录屏页验证录制（含系统声音 / 麦克风勾选、取消清理半成品、结果转 MP4）。
 
 ## 音轨与输出规则（修复后）
 
