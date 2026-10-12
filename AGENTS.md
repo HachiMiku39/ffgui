@@ -11,7 +11,7 @@ FFGui 是一个基于 Electron 的桌面音视频工具箱（GUI for FFmpeg）�
 ## 技术栈
 
 - Electron 41（`package.json` 中 `devDependencies.electron`），CommonJS（`"type": "commonjs"`），Node 22（CI）
-- 无前端框架、无打包器、无 TypeScript：渲染层就是原生 HTML + CSS + ES5 风格 IIFE 脚本
+- 无前端框架、无打包器、无 TypeScript：渲染层就是原生 HTML + CSS + ES6+ 风格 IIFE 脚本
 - 打包工具：Electron Forge 7（`forge.config.js`），makers：Squirrel（Windows）、zip（macOS）、deb/rpm（Linux）
 - `.npmrc` 配置了 npmmirror 的 Electron 镜像（`electron_mirror`），安装依赖在国内网络下进行
 - 打包时的 JS/HTML/CSS 压缩（terser / html-minifier-terser / clean-css）是 devDependencies，通过 `forge.config.js` 的 `packageAfterCopy` 钩子执行
@@ -94,8 +94,9 @@ main/ffmpeg.js      主进程核心：
                       调用 getDisplayMedia，handler 按登记授予（video 为所选来源；
                       audio 请求且 win32 时授予 'loopback' 系统声音回环——Electron
                       文档明确仅 Windows 支持，macOS/Linux 无系统级回环，只能录
-                      麦克风；勾选须在选择来源前，页面有校验并在勾选后自动重开
-                      来源选择）
+                      麦克风；渲染层在开始录制时会校验"勾了系统声音但流里没有
+                      音轨"并拦截，勾选发生在选择来源之后会自动按已登记的
+                      sourceId 静默重新采集，来源失效才重开来源选择弹窗）
                     - 录屏写盘：渲染进程 MediaRecorder 按 1s 分块经
                       ffgui:recordWriteChunk 流式追加到主进程 fs.WriteStream
                       （recordStreams 按路径存流，write 等回调实现背压）；
@@ -137,7 +138,7 @@ html/js/convert.js  转码页全部逻辑：候选格式/编码器清单是硬�
                     相关表单项，提交前校验分辨率格式
 html/js/merge.js    合并页全部逻辑：字幕单槽位拖放（拖到拼接队列区域的字幕文件会
                     自动转投字幕槽位），开始前校验字幕时长与合并总时长，
-                    不匹配时弹警告由用户确认
+                    相差超过 10 秒才弹警告由用户确认（容差 ±10 秒内视为匹配）
 html/js/clip.js     截取页全部逻辑：原生 <video> 播放（不引第三方播放器库，库不增加
                     解码能力），起止双滑块 + 步进寻址 + 抓帧截图；播放 error 时调
                     makePreview 生成预览副本兜底，失败则判定无法预览、禁止截取
@@ -150,7 +151,7 @@ html/js/record.js   录屏页全部逻辑：desktopCapturer 缩略图弹窗选�
                     videoBitsPerSecond 8/4/2 Mbps），1s 分块串行写入主进程；
                     录制中 beforeunload 拦截离开页面
 html/css/style.css  全部页面共用样式
-bin/ffmpeg.exe      内置的 ffmpeg（Windows），约 110MB；放置规则见 bin/README.md：
+bin/ffmpeg.exe      内置的 ffmpeg（Windows，full build 约 210MB）；放置规则见 bin/README.md：
 bin/bin/ bin/lib/   macOS 为 bin/bin/ffmpeg + bin/lib/（自建预编译构建，来自
                     kisaragychihaya/ffmpeg_build_mac 的 release，混合静态构建：
                     大部分库静态编入，无 .a 静态库的依赖仍动态链接，经 dylibbundler
@@ -161,7 +162,8 @@ bin/bin/ bin/lib/   macOS 为 bin/bin/ffmpeg + bin/lib/（自建预编译构建�
                     的构建，自建构建已含）；Linux 不携带 bin/，走系统 PATH
 test_media/         手工测试用的示例音视频文件（不进入安装包）
 _cdp_debug.js       开发调试脚本（CDP 连 Electron 渲染进程观察 video 加载状态，
-                    依赖 ws，属一次性调试工具，不参与正常运行）
+                    依赖 ws（未列入 package.json，需另行 npm i ws），
+                    属一次性调试工具，不参与正常运行）
 forge.config.js     Electron Forge 配置（含压缩钩子与 Fuses）
 .github/workflows/  CI（见下文「部署 / CI」）
 ```
@@ -218,7 +220,7 @@ forge.config.js     Electron Forge 配置（含压缩钩子与 Fuses）
 - 应用图标已配置为 `assets/imgs/` 下的像素风胡萝卜（icon.png / icon.ico / icon.icns，
   命名必须与 `packagerConfig.icon` 一致，electron-packager 才能按平台自动选扩展名），
   由 `forge.config.js` 的 `packagerConfig.icon`、`index.js` 的窗口图标与各 HTML 的 favicon 引用
-- 打包体积较大：`bin/ffmpeg.exe` 约 110MB，经 `extraResource` 原样分发且不进 asar，
+- 打包体积较大：`bin/ffmpeg.exe` 约 210MB，经 `extraResource` 原样分发且不进 asar，
   `packagerConfig.ignore` 中的 `/^\/bin($|\/)/` 规则不要删除，否则 asar 里会再塞一份；
   `extraResource` 按构建平台条件配置，Windows / macOS 携带 `bin/`，Linux 不携带
 - forge.config.js 中不能出现 null 值（proxify 会崩溃），macOS 不签名靠省略 osxSign 实现
