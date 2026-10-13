@@ -48,6 +48,26 @@ async function minifyFiles(dir) {
   }
 }
 
+// 精简 Electron 运行时文件（buildPath 为 resources/app，运行时文件在其上两级）
+// 界面仅简体中文：裁剪多余语言 pak（约 45MB/55 个）
+// dxcompiler/dxil 仅供 WebGPU 使用（应用未用），删除（约 26MB）
+// vk_swiftshader 保留：无 GPU 环境（虚拟机/远程桌面）渲染兜底
+function trimRuntime(buildPath) {
+  const root = path.resolve(buildPath, '..', '..');
+  const localesDir = path.join(root, 'locales');
+  if (fs.existsSync(localesDir)) {
+    for (const f of fs.readdirSync(localesDir)) {
+      if (f.endsWith('.pak') && f !== 'zh-CN.pak' && f !== 'en-US.pak') {
+        fs.rmSync(path.join(localesDir, f));
+      }
+    }
+  }
+  for (const f of ['dxcompiler.dll', 'dxil.dll']) {
+    const p = path.join(root, f);
+    if (fs.existsSync(p)) fs.rmSync(p);
+  }
+}
+
 module.exports = {
   hooks: {
     // packageAfterCopy 在文件被复制到临时打包目录后触发，
@@ -55,6 +75,7 @@ module.exports = {
     packageAfterCopy: async (forgeConfig, buildPath) => {
       console.log('正在压缩 JS / HTML / CSS 文件...', buildPath);
       await minifyFiles(buildPath);
+      trimRuntime(buildPath);
       console.log('压缩完成！');
     },
   },
@@ -68,7 +89,14 @@ module.exports = {
     // 内置 bin/ffmpeg.exe（Windows）/ bin/ffmpeg（macOS）是独立可执行文件，
     // 无法从 asar 内 spawn，作为额外资源复制到 resources/bin/
     // （main/ffmpeg.js 中会区分开发/打包路径）；Linux 使用系统 ffmpeg，不携带 bin/
-    extraResource: process.platform === 'linux' ? [] : ['./bin/'],
+    // Windows 只带 ffmpeg.exe：应用探测与处理全部走 ffmpeg，ffprobe 未被使用
+    // （gyan full build 的 ffprobe 与 ffmpeg 一样 140MB+，不携带可省一半 bin 体积）
+    extraResource:
+      process.platform === 'linux'
+        ? []
+        : process.platform === 'darwin'
+          ? ['./bin/']
+          : ['./bin/ffmpeg.exe'],
     ignore: [
       /^\/out($|\/)/,
       /^\/test_media($|\/)/,

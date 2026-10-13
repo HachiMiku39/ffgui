@@ -10,6 +10,8 @@
 
 Unicode true
 SetCompressor /SOLID lzma
+; 固实压缩配合更大的字典提升压缩率（解压端内存占用约 64MB+，可接受）
+SetCompressorDictSize 64
 ManifestDPIAware true
 
 !include "${GEN_DEFINES}"
@@ -59,6 +61,10 @@ VIAddVersionKey "OriginalFilename" "${ORIGINAL_FILENAME}"
 Section "${SECTION_NAME}" SEC_INSTALL
   SectionIn RO
 
+  ; 安装前先结束正在运行的旧版本进程，避免文件占用导致升级失败
+  nsExec::Exec "taskkill /F /IM ${APP_EXE} /T"
+  Pop $0
+
   SetOutPath "$INSTDIR"
   File /r "${APP_DIR}\*.*"
 
@@ -88,11 +94,14 @@ SectionEnd
 
 ; =============================================================
 Section "Uninstall"
+  ; 先结束正在运行的应用进程，否则 FFGui.exe 被占用会导致删除失败、目录残留
+  nsExec::Exec "taskkill /F /IM ${APP_EXE} /T"
+  Pop $0
+
   Delete "$DESKTOP\${APP_NAME}.lnk"
   RMDir /r "$SMPROGRAMS\${APP_NAME}"
   RMDir /r "$INSTDIR"
-  ; 大包文件（FFGui.exe 200MB+）刚装完即卸载时可能仍被杀毒软件占用，
-  ; 短暂等待后重试一次，避免残留安装目录
+  ; 兜底：大包文件被杀毒软件短暂占用时，等待后重试一次
   IfFileExists "$INSTDIR" 0 uninst_done
     Sleep 2000
     RMDir /r "$INSTDIR"

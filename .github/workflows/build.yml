@@ -119,6 +119,9 @@ jobs:
       - name: 打包（arm64）
         run: npm run package -- --arch=arm64
 
+      - name: 生成 NSIS 安装包
+        run: node scripts/build-installer.cjs --app-dir out/FFGui-win32-arm64 --arch arm64
+
       - name: 压缩产物
         shell: pwsh
         run: 7z a FFGui-windows-arm64.7z ./out/FFGui-win32-arm64 | Out-Null
@@ -129,11 +132,19 @@ jobs:
           name: FFGui-windows-arm64
           path: FFGui-windows-arm64.7z
 
+      - name: 上传安装包产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: FFGui-windows-arm64-Setup
+          path: out/make/**/FFGui-*-Setup.exe
+
       - name: 上传到 Release（仅 Release 触发时）
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
-          files: FFGui-windows-arm64.7z
+          files: |
+            FFGui-windows-arm64.7z
+            out/make/**/FFGui-*-Setup.exe
 
   macos:
     runs-on: macos-latest

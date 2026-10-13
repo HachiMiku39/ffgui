@@ -9,7 +9,13 @@ const path = require('path');
 // - Linux：使用系统 PATH 中的 ffmpeg
 function getFfmpegPath() {
   if (process.platform === 'win32') {
+    // extraResource 以文件形式只携带 ffmpeg.exe（不带未使用的 ffprobe），
+    // 打包后位于 resources/ 根目录；兼容旧布局 resources/bin/ffmpeg.exe
     const base = app.isPackaged ? process.resourcesPath : app.getAppPath();
+    if (app.isPackaged) {
+      const flat = path.join(base, 'ffmpeg.exe');
+      if (fs.existsSync(flat)) return flat;
+    }
     return path.join(base, 'bin', 'ffmpeg.exe');
   }
   if (process.platform === 'darwin') {

@@ -99,7 +99,8 @@ function build({ appDir, outDir, arch }) {
   }
 
   fs.mkdirSync(outDir, { recursive: true });
-  const suffix = arch === 'arm64' ? '-arm64' : '';
+  // 文件名始终带架构标识，避免 x64/arm64 安装包混淆
+  const suffix = arch === 'arm64' ? '-arm64' : '-x64';
   const outFile = path.join(outDir, `FFGui-${version}${suffix}-Setup.exe`);
 
   // 中文产品名等含非 ASCII 字符，写入 defines.nsh 时带 UTF-8 BOM（NSIS Unicode 解析需要）
