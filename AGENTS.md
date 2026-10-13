@@ -12,7 +12,7 @@ FFGui 是一个基于 Electron 的桌面音视频工具箱（GUI for FFmpeg）�
 
 - Electron 41（`package.json` 中 `devDependencies.electron`），CommonJS（`"type": "commonjs"`），Node 22（CI）
 - 无前端框架、无打包器、无 TypeScript：渲染层就是原生 HTML + CSS + ES6+ 风格 IIFE 脚本
-- 打包工具：Electron Forge 7（`forge.config.js`），makers：Squirrel（Windows）、zip（macOS）、deb/rpm（Linux）
+- 打包工具：Electron Forge 7（`forge.config.js`），makers：本地 NSIS maker（Windows，见下文「NSIS 安装包」）、zip（macOS）、deb/rpm（Linux）
 - `.npmrc` 配置了 npmmirror 的 Electron 镜像（`electron_mirror`），安装依赖在国内网络下进行
 - 打包时的 JS/HTML/CSS 压缩（terser / html-minifier-terser / clean-css）是 devDependencies，通过 `forge.config.js` 的 `packageAfterCopy` 钩子执行
 
@@ -197,6 +197,23 @@ _cdp_debug.js       开发调试脚本（CDP 连 Electron 渲染进程观察 vid
                     依赖 ws（未列入 package.json，需另行 npm i ws），
                     属一次性调试工具，不参与正常运行）
 forge.config.js     Electron Forge 配置（含压缩钩子与 Fuses）
+makers/nsis.js      本地 Electron Forge maker：Windows 安装包（NSIS）适配层，
+                    实际编译逻辑在 scripts/build-installer.cjs；
+                    配置里必须 new 实例传入（Forge 凭 __isElectronForgeMaker 识别）
+assets/installer.nsi NSIS 安装脚本：MUI2 现代界面（欢迎/许可证[须同意]/目录/安装/完成页），
+                    每用户安装（%LOCALAPPDATA%\Programs，无需管理员），桌面与开始菜单
+                    快捷方式「狒狒格式工具箱」+ 卸载入口，写入 HKCU 卸载注册表项；
+                    中文产品名/路径由构建时生成的 UTF-8 BOM defines.nsh 注入
+scripts/build-installer.cjs  编译安装包：调用 tools/nsisbi/makensis.exe；
+                    也可独立运行 node scripts/build-installer.cjs --app-dir out/FFGui-win32-x64
+                    [--arch arm64]（CI 即此用法）；脚本会先复制 installer.nsi 并补
+                    UTF-8 BOM（makensis 把无 BOM 文件按 ANSI 解析）
+tools/nsisbi/       NSISBI（NSIS 解除 2GB 限制分支）免安装 amd64 版的解压目标目录
+                    （v3.12.2；来源与裁剪说明见 tools/nsisbi/README.md）。
+                    二进制不入库：构建时由 build-installer.cjs 从 v0.1 Release 资源
+                    nsisbi-3.12.2-amd64-trimmed.zip 下载解压（curl.exe + 系统 bsdtar，
+                    注意 PATH 里 Git 的 GNU tar 不认 zip，必须用 System32 绝对路径），
+                    目录内容被 .gitignore 忽略，删后下次构建自动重下
 .github/workflows/  CI（见下文「部署 / CI」）
 ```
 
@@ -205,7 +222,8 @@ forge.config.js     Electron Forge 配置（含压缩钩子与 Fuses）
 - `npm install` / `npm ci` — 安装依赖
 - `npm start` — 开发运行（`electron-forge start`）
 - `npm run package` — 打包到 `out/FFGui-win32-x64/`（packageAfterCopy 钩子会压缩 JS/HTML/CSS）
-- `npm run make` — 生成安装包（Windows 为 Squirrel）
+- `npm run make` — 生成安装包：Windows 为 NSIS 安装包 `FFGui-<版本>[-arm64]-Setup.exe`
+  （MUI2 现代界面 + 许可证页须同意 + 快捷方式「狒狒格式工具箱」，每用户安装无需管理员）
 
 `npm test` 使用 Node 内置测试运行器（`scripts/regression.test.cjs`），需要 PATH 中有 ffmpeg/ffprobe，或设置 FFMPEG/FFPROBE。没有 lint/format 配置。
 
@@ -215,15 +233,18 @@ forge.config.js     Electron Forge 配置（含压缩钩子与 Fuses）
 
 - Windows x64 任务：从 GyanD/codexffmpeg 的 GitHub 最新 release 下载 full_build.7z（gyan.dev
   直链在 CI 上会被反爬拦截），取 `ffmpeg.exe` 放入 `bin/`，`npm ci` + `npm run package`，
-  产物压缩为 `FFGui-windows-x64.7z` 上传 artifact；Release 触发时同时上传到 Release Assets
+  再经 `scripts/build-installer.cjs`（见上）生成 NSIS 安装包；`FFGui-windows-x64.7z` 与
+  `FFGui-<版本>-Setup.exe` 均上传 artifact；Release 触发时同时上传到 Release Assets
 - Windows arm64 任务：从 tordona/ffmpeg-win-arm64 最新 release 下载 full-static-win-arm64.7z，
   同样取 `ffmpeg.exe` 放入 `bin/`；x64 runner 无法执行 arm64 二进制，改为校验 PE 头机器类型
   （0xAA64）；`npm run package -- --arch=arm64` 交叉打包（无原生依赖，可直接交叉），
-  产物为 `FFGui-windows-arm64.7z`
+  产物为 `FFGui-windows-arm64.7z` + `FFGui-<版本>-arm64-Setup.exe`（NSIS 安装器
+  架构无关，由 x64 makensis 交叉编译 arm64 内容）
 - macOS 任务：下载 kisaragychihaya/ffmpeg_build_mac 最新 release 的 macos-arm64-static
   tar.gz，`bin/` 与 `lib/` 原样放入项目 `bin/` 并 `chmod +x`，打包后用 ditto 压缩为
   `FFGui-macos-arm64.zip`；Release 触发时同样上传
-- 仓库本身不提交 `bin/ffmpeg.exe` 等大文件，CI 每次现下
+- 仓库本身不提交 `bin/ffmpeg.exe` 等大文件，CI 每次现下；NSISBI 编译器同样不入库，
+  由 build-installer.cjs 在构建时从 v0.1 Release 资源下载解压
 
 ## 代码约定
 

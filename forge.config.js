@@ -1,5 +1,7 @@
 const { FusesPlugin } = require('@electron-forge/plugin-fuses');
 const { FuseV1Options, FuseVersion } = require('@electron/fuses');
+// 本地 NSIS maker（tools/nsisbi 内置编译器，见 makers/nsis.js）
+const MakerNsis = require('./makers/nsis');
 const { minify } = require('terser');
 const { minify: minifyHtml } = require('html-minifier-terser');
 const CleanCSS = require('clean-css');
@@ -87,13 +89,11 @@ module.exports = {
   },
   rebuildConfig: {},
   makers: [
-    {
-      name: '@electron-forge/maker-squirrel',
-      config: {
-        // 安装器图标（exe 本体图标由 packagerConfig.icon 提供）
-        setupIcon: path.join(__dirname, 'assets', 'imgs', 'icon.ico'),
-      },
-    },
+    // Windows：仓库内置 NSISBI（tools/nsisbi）+ MUI2 现代界面，
+    // 含许可证页（须同意，使用项目 LICENSE）与「狒狒格式工具箱」快捷方式，
+    // 安装/卸载均无需管理员权限（每用户安装到 %LOCALAPPDATA%\Programs）。
+    // 注意必须传实例（new）：Forge 凭实例的 __isElectronForgeMaker 识别自定义 maker
+    new MakerNsis(),
     {
       name: '@electron-forge/maker-zip',
       platforms: ['darwin'],

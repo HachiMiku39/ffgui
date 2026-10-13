@@ -19,6 +19,10 @@ bug_report/
 .tmp-*
 *.log
 
+# NSISBI 编译器目录：二进制由 scripts/build-installer.cjs 从 Release 资源下载解压，不入库
+tools/nsisbi/*
+!tools/nsisbi/README.md
+
 # 系统与编辑器
 .DS_Store
 Thumbs.db

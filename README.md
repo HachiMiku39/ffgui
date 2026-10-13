@@ -45,7 +45,7 @@
 npm install
 npm start          # 开发运行
 npm run package    # 打包（输出到 out/）
-npm run make       # 生成安装包（Windows: Squirrel / macOS: zip / Linux: deb、rpm）
+npm run make       # 生成安装包（Windows: NSIS / macOS: zip / Linux: deb、rpm）
 ```
 
 ### ffmpeg 获取

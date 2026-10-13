@@ -1,11 +1,6 @@
 const { app, BrowserWindow } = require('electron');
 const path = require('path');
 
-// 兼容 electron-squirrel-startup（Windows 安装包快捷方式场景）
-if (require('electron-squirrel-startup')) {
-  app.quit();
-}
-
 function createWindow() {
   const win = new BrowserWindow({
     width: 1080,
