@@ -164,6 +164,16 @@
     return 'invalid';
   }
 
+  // 帧率解析：返回规范化的数字字符串；null=保持源帧率（默认）；'invalid'=无法识别
+  function parseFps(text) {
+    const t = (text || '').trim();
+    if (!t) return null;
+    if (!/^\d+(\.\d+)?$/.test(t)) return 'invalid';
+    const fps = Number(t);
+    if (!isFinite(fps) || fps <= 0 || fps > 240) return 'invalid';
+    return t;
+  }
+
   function fillSelect(select, items) {
     select.innerHTML = '';
     for (const item of items) {
@@ -303,29 +313,74 @@
 
   }
 
+  // 预设表（与主进程 main/ffmpeg.js 的 DEVICE_PRESETS 同名表同步维护）：
+  // 选中预设时按表锁定并填写表单；tip 显示在预设下方，maxFps 用于帧率标签文案。
+  const PRESET_BASE = { format: 'mp4', vcodec: 'libx264', acodec: 'aac', hwaccel: '',
+    pixFmt: 'yuv420p', fps: '', vrateMode: 'vbr', channels: '2' };
+  const DEVICE_PRESETS = {
+    'ipod4-540': { ...PRESET_BASE, h264Profile: 'main', h264Level: '3.1', sampleRate: '48000',
+      vbitrate: '2000', abitrate: '128', scale: '960x540', maxFps: 30,
+      tip: 'iPod touch 4 / iOS 6：MP4 · H.264 Main 3.1 · 8-bit · 保持比例 · 最高 30 fps · AAC 双声道 128 kbps；默认第 1 音轨，可手动选轨。设备预设锁定兼容参数；其他机型请核对规格。10-bit 不一定是 HDR，色调映射需按源文件选择。' },
+    'ipod4-720': { ...PRESET_BASE, h264Profile: 'main', h264Level: '3.1', sampleRate: '48000',
+      vbitrate: '2000', abitrate: '128', scale: '1280x720', maxFps: 30,
+      tip: 'iPod touch 4 / iOS 6：MP4 · H.264 Main 3.1 · 8-bit · 保持比例 · 最高 30 fps · AAC 双声道 128 kbps；默认第 1 音轨，可手动选轨。设备预设锁定兼容参数；其他机型请核对规格。10-bit 不一定是 HDR，色调映射需按源文件选择。' },
+    'bili-1080p': { ...PRESET_BASE, h264Profile: 'high', h264Level: '4.2', sampleRate: '48000',
+      vbitrate: '6000', abitrate: '320', scale: '1920x1080', maxFps: 60,
+      tip: 'B站 1080P 投稿：MP4 · H.264 High 4.2 · 保持比例 · 最高 60 fps · 均值 6000 kbps（峰值 12000）· AAC 320 kbps/48 kHz。均值 6000 kbps 为平台免二压上限；默认第 1 音轨，可手动选轨。' },
+    'bili-720p': { ...PRESET_BASE, h264Profile: 'high', h264Level: '3.1', sampleRate: '48000',
+      vbitrate: '3000', abitrate: '192', scale: '1280x720', maxFps: 30,
+      tip: 'B站 720P 投稿：MP4 · H.264 High 3.1 · 保持比例 · 最高 30 fps · 均值 3000 kbps（峰值 6000）· AAC 192 kbps/48 kHz；默认第 1 音轨，可手动选轨。' },
+    'douyin-1080p': { ...PRESET_BASE, h264Profile: 'high', h264Level: '4.2', sampleRate: '48000',
+      vbitrate: '6000', abitrate: '192', scale: '1920x1080', maxFps: 60,
+      tip: '抖音/快手 1080P：MP4 · H.264 High 4.2 · 保持比例 · 最高 60 fps · 均值 6000 kbps（峰值 12000）· AAC 192 kbps/48 kHz。平台建议码率 2–8 Mbps；竖屏源请确认比例。' },
+    'wechat-1080p': { ...PRESET_BASE, h264Profile: 'high', h264Level: '4.0', sampleRate: '48000',
+      vbitrate: '4000', abitrate: '128', scale: '1920x1080', maxFps: 30,
+      tip: '微信视频号 1080P：MP4 · H.264 High 4.0 · 保持比例 · 最高 30 fps · 均值 4000 kbps（峰值 8000）· AAC 128 kbps/48 kHz；默认第 1 音轨，可手动选轨。' },
+    'youtube-1080p': { ...PRESET_BASE, h264Profile: 'high', h264Level: '4.2', sampleRate: '48000',
+      vbitrate: '8000', abitrate: '384', scale: '1920x1080', maxFps: 60,
+      tip: 'YouTube 1080P：MP4 · H.264 High 4.2 · 保持比例 · 最高 60 fps · 均值 8000 kbps（峰值 12000）· AAC 384 kbps/48 kHz。符合官方推荐上传编码（1080p30 8 Mbps / 1080p60 12 Mbps）。' },
+    'iphone4s': { ...PRESET_BASE, h264Profile: 'high', h264Level: '4.0', sampleRate: '48000',
+      vbitrate: '4000', abitrate: '160', scale: '1920x1080', maxFps: 30,
+      tip: 'iPhone 4S / iOS 6：MP4 · H.264 High 4.0 · 保持比例 · 最高 30 fps · 均值 4000 kbps（峰值 8000）· AAC 160 kbps/48 kHz。为 Apple 官方 1080p 播放上限（High ≤4.0、AAC-LC ≤160 kbps）；默认第 1 音轨，可手动选轨。' },
+    'psp': { ...PRESET_BASE, h264Profile: 'main', h264Level: '2.2', sampleRate: '48000',
+      vbitrate: '1000', abitrate: '128', scale: '480x272', maxFps: 30,
+      tip: 'PSP：MP4 · H.264 Main 2.2 · 保持比例 · 480×272 · 最高 30 fps · 均值 1000 kbps（峰值 1500）· AAC 128 kbps/48 kHz；默认第 1 音轨，可手动选轨。' },
+    'android-legacy': { ...PRESET_BASE, h264Profile: 'baseline', h264Level: '2.1', sampleRate: '44100',
+      vbitrate: '1000', abitrate: '128', scale: '800x480', maxFps: 30,
+      tip: '老款安卓（2.x 时代）：MP4 · H.264 Baseline 2.1 · 保持比例 · 800×480 · 最高 30 fps · 均值 1000 kbps（峰值 1500）· AAC 128 kbps/44.1 kHz；默认第 1 音轨，可手动选轨。' },
+    'web-safe': { ...PRESET_BASE, h264Profile: 'baseline', h264Level: '3.0', sampleRate: '44100',
+      vbitrate: '2500', abitrate: '128', scale: '1280x720', maxFps: 30,
+      tip: '最大兼容：MP4 · H.264 Baseline 3.0 · 保持比例 · 720p · 最高 30 fps · 均值 2500 kbps（峰值 5000）· AAC 128 kbps/44.1 kHz。适合网页嵌入与老旧播放设备；默认第 1 音轨，可手动选轨。' },
+    'tv-4k': { ...PRESET_BASE, h264Profile: 'high', h264Level: '5.1', sampleRate: '48000',
+      vbitrate: '20000', abitrate: '192', scale: '3840x2160', maxFps: 30,
+      tip: '4K 电视/盒子（兼 B站 4K 投稿）：MP4 · H.264 High 5.1 · 保持比例 · 2160p · 最高 30 fps · 均值 20000 kbps（峰值 40000）· AAC 192 kbps/48 kHz。B站 4K 免二压均值上限即 20000 kbps；默认第 1 音轨，可手动选轨。' },
+  };
+
   // 切换回自定义时恢复原设置，避免把预设参数误用于纯音频任务。
   const presetFields = ['format', 'vcodec', 'acodec', 'hwaccel', 'pixFmt', 'h264Profile',
     'h264Level', 'fps', 'channels', 'sampleRate', 'vbitrate', 'vrateMode', 'abitrate', 'scale'];
+  const defaultPresetTip = els.presetTip.textContent;
+  const defaultFpsLabel = els.fpsLabel.textContent;
   let customValues = null;
   function onPresetChange() {
     const preset = els.devicePreset.value;
     if (preset) {
       if (!customValues) customValues = Object.fromEntries(presetFields.map((key) => [key, els[key].value]));
-      const values = { format: 'mp4', vcodec: 'libx264', acodec: 'aac', hwaccel: '',
-        pixFmt: 'yuv420p', h264Profile: 'main', h264Level: '3.1', fps: '', channels: '2',
-        sampleRate: '48000', vbitrate: '2000', vrateMode: 'vbr', abitrate: '128',
-        scale: preset === 'ipod4-720' ? '1280x720' : '960x540' };
-      presetFields.forEach((key) => { els[key].value = values[key]; els[key].disabled = true; });
+      const conf = DEVICE_PRESETS[preset];
+      presetFields.forEach((key) => { els[key].value = conf[key]; els[key].disabled = true; });
+      els.presetTip.textContent = conf.tip;
+      els.fpsLabel.textContent = `输出帧率（最高 ${conf.maxFps} fps，保留较低帧率）`;
     } else {
       presetFields.forEach((key) => {
         if (customValues) els[key].value = customValues[key];
         els[key].disabled = false;
       });
       customValues = null;
+      els.presetTip.textContent = defaultPresetTip;
+      els.fpsLabel.textContent = defaultFpsLabel;
     }
     els.presetTip.classList.toggle('hidden', !preset);
     els.audioTrackLabel.textContent = preset ? '音轨序号（留空选择第 1 轨）' : '音轨序号（留空保留全部）';
-    els.fpsLabel.textContent = preset ? '输出帧率（最高 30 fps，保留较低帧率）' : '输出帧率（固定帧率）';
     onFormatChange();
   }
 
@@ -363,13 +418,20 @@
     }
     const video = !AUDIO_ONLY.has(els.format.value) && els.vcodec.value !== 'none';
     const audio = !VIDEO_ONLY.has(els.format.value) && els.acodec.value !== 'none';
+    const fpsVal = video ? parseFps(els.fps.value) : null;
+    if (fpsVal === 'invalid') {
+      els.advancedModal.classList.remove('hidden');
+      els.fps.focus();
+      log('帧率格式不正确，请输入 1–240 之间的数字（如 24、23.976），留空保持源帧率');
+      return;
+    }
     const job = {
       devicePreset: els.devicePreset.value,
       sampleOnly: els.sampleOnly.checked,
       pixFmt: video ? els.pixFmt.value : '',
       h264Profile: video ? els.h264Profile.value : '',
       h264Level: video ? els.h264Level.value : '',
-      fps: video ? els.fps.value : '',
+      fps: video ? (fpsVal || '') : '',
       channels: audio ? els.channels.value : '',
       sampleRate: audio ? els.sampleRate.value : '',
       id3Version: els.id3Version.value,
@@ -450,6 +512,10 @@
   // 分辨率输入即时校验：无法识别的输入标红，提交时阻止执行
   els.scale.addEventListener('input', () => {
     els.scale.classList.toggle('invalid', parseScale(els.scale.value) === 'invalid');
+  });
+  // 帧率输入即时校验：只接受 1–240 之间的数字，留空保持源帧率
+  els.fps.addEventListener('input', () => {
+    els.fps.classList.toggle('invalid', parseFps(els.fps.value) === 'invalid');
   });
 
   els.addFiles.addEventListener('click', async () => {

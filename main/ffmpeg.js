@@ -275,15 +275,77 @@ function validateAudioSelection(job, probes, merging = false) {
   }
 }
 
+// 设备/平台预设表：主进程按表落实全部锁定参数，不能只依赖界面填值；
+// 须在分配输出扩展名前调用。新增预设时渲染层 convert.js 的同名表同步维护。
+const DEVICE_PRESETS = {
+  // iPod touch 4 / iOS 6（保持比例缩放，分辨率上限两档）
+  'ipod4-540': { format: 'mp4', vcodec: 'libx264', acodec: 'aac', hwaccel: '',
+    pixFmt: 'yuv420p', h264Profile: 'main', h264Level: '3.1', fps: '', maxFps: 30,
+    scale: { w: 960, h: 540 }, fitScale: true, vbitrate: 2000, vrateMode: 'vbr',
+    maxrate: 3000, bufsize: 6000, abitrate: 128, channels: 2, sampleRate: 48000 },
+  'ipod4-720': { format: 'mp4', vcodec: 'libx264', acodec: 'aac', hwaccel: '',
+    pixFmt: 'yuv420p', h264Profile: 'main', h264Level: '3.1', fps: '', maxFps: 30,
+    scale: { w: 1280, h: 720 }, fitScale: true, vbitrate: 2000, vrateMode: 'vbr',
+    maxrate: 3000, bufsize: 6000, abitrate: 128, channels: 2, sampleRate: 48000 },
+  // B站 1080P 投稿：平台均值 ≤6000 kbps / 峰值 ≤24000 / 音频 ≤320 kbps，免二压上限
+  'bili-1080p': { format: 'mp4', vcodec: 'libx264', acodec: 'aac', hwaccel: '',
+    pixFmt: 'yuv420p', h264Profile: 'high', h264Level: '4.2', fps: '', maxFps: 60,
+    scale: { w: 1920, h: 1080 }, fitScale: true, vbitrate: 6000, vrateMode: 'vbr',
+    maxrate: 12000, bufsize: 24000, abitrate: 320, channels: 2, sampleRate: 48000 },
+  // B站 720P 投稿
+  'bili-720p': { format: 'mp4', vcodec: 'libx264', acodec: 'aac', hwaccel: '',
+    pixFmt: 'yuv420p', h264Profile: 'high', h264Level: '3.1', fps: '', maxFps: 30,
+    scale: { w: 1280, h: 720 }, fitScale: true, vbitrate: 3000, vrateMode: 'vbr',
+    maxrate: 6000, bufsize: 12000, abitrate: 192, channels: 2, sampleRate: 48000 },
+  // 抖音/快手 1080P（平台建议 1080p、30/60 fps、H.264、码率 2–8 Mbps）
+  'douyin-1080p': { format: 'mp4', vcodec: 'libx264', acodec: 'aac', hwaccel: '',
+    pixFmt: 'yuv420p', h264Profile: 'high', h264Level: '4.2', fps: '', maxFps: 60,
+    scale: { w: 1920, h: 1080 }, fitScale: true, vbitrate: 6000, vrateMode: 'vbr',
+    maxrate: 12000, bufsize: 24000, abitrate: 192, channels: 2, sampleRate: 48000 },
+  // 微信视频号 1080P
+  'wechat-1080p': { format: 'mp4', vcodec: 'libx264', acodec: 'aac', hwaccel: '',
+    pixFmt: 'yuv420p', h264Profile: 'high', h264Level: '4.0', fps: '', maxFps: 30,
+    scale: { w: 1920, h: 1080 }, fitScale: true, vbitrate: 4000, vrateMode: 'vbr',
+    maxrate: 8000, bufsize: 16000, abitrate: 128, channels: 2, sampleRate: 48000 },
+  // YouTube 1080P（官方建议 1080p30 8 Mbps / 1080p60 12 Mbps，AAC ≤384 kbps）
+  'youtube-1080p': { format: 'mp4', vcodec: 'libx264', acodec: 'aac', hwaccel: '',
+    pixFmt: 'yuv420p', h264Profile: 'high', h264Level: '4.2', fps: '', maxFps: 60,
+    scale: { w: 1920, h: 1080 }, fitScale: true, vbitrate: 8000, vrateMode: 'vbr',
+    maxrate: 12000, bufsize: 24000, abitrate: 384, channels: 2, sampleRate: 48000 },
+  // iPhone 4S / iOS 6（Apple 官方 1080p30 播放上限：High ≤4.0，AAC-LC ≤160 kbps）
+  'iphone4s': { format: 'mp4', vcodec: 'libx264', acodec: 'aac', hwaccel: '',
+    pixFmt: 'yuv420p', h264Profile: 'high', h264Level: '4.0', fps: '', maxFps: 30,
+    scale: { w: 1920, h: 1080 }, fitScale: true, vbitrate: 4000, vrateMode: 'vbr',
+    maxrate: 8000, bufsize: 16000, abitrate: 160, channels: 2, sampleRate: 48000 },
+  // PSP：H.264 Main 2.2 / 480×272，AAC-LC 48 kHz
+  'psp': { format: 'mp4', vcodec: 'libx264', acodec: 'aac', hwaccel: '',
+    pixFmt: 'yuv420p', h264Profile: 'main', h264Level: '2.2', fps: '', maxFps: 30,
+    scale: { w: 480, h: 272 }, fitScale: true, vbitrate: 1000, vrateMode: 'vbr',
+    maxrate: 1500, bufsize: 3000, abitrate: 128, channels: 2, sampleRate: 48000 },
+  // 老款安卓（2.x 时代）：Baseline 2.1 / 800×480
+  'android-legacy': { format: 'mp4', vcodec: 'libx264', acodec: 'aac', hwaccel: '',
+    pixFmt: 'yuv420p', h264Profile: 'baseline', h264Level: '2.1', fps: '', maxFps: 30,
+    scale: { w: 800, h: 480 }, fitScale: true, vbitrate: 1000, vrateMode: 'vbr',
+    maxrate: 1500, bufsize: 3000, abitrate: 128, channels: 2, sampleRate: 44100 },
+  // 最大兼容（网页嵌入 / 老旧播放设备）：Baseline 3.0 / 720p
+  'web-safe': { format: 'mp4', vcodec: 'libx264', acodec: 'aac', hwaccel: '',
+    pixFmt: 'yuv420p', h264Profile: 'baseline', h264Level: '3.0', fps: '', maxFps: 30,
+    scale: { w: 1280, h: 720 }, fitScale: true, vbitrate: 2500, vrateMode: 'vbr',
+    maxrate: 5000, bufsize: 10000, abitrate: 128, channels: 2, sampleRate: 44100 },
+  // 4K 电视/盒子（兼 B站 4K 投稿：平台建议均值 20000 kbps）
+  'tv-4k': { format: 'mp4', vcodec: 'libx264', acodec: 'aac', hwaccel: '',
+    pixFmt: 'yuv420p', h264Profile: 'high', h264Level: '5.1', fps: '', maxFps: 30,
+    scale: { w: 3840, h: 2160 }, fitScale: true, vbitrate: 20000, vrateMode: 'vbr',
+    maxrate: 40000, bufsize: 60000, abitrate: 192, channels: 2, sampleRate: 48000 },
+};
+
 // 预设在主进程再次落实，不能只依赖界面填值；必须在生成输出扩展名前调用。
 function normalizeConvertJob(job) {
   if (!job.devicePreset) return { ...job };
-  const sizes = { 'ipod4-540': { w: 960, h: 540 }, 'ipod4-720': { w: 1280, h: 720 } };
-  if (!sizes[job.devicePreset]) throw new Error('未知的设备预设');
-  return { ...job, format: 'mp4', vcodec: 'libx264', acodec: 'aac', hwaccel: '',
-    pixFmt: 'yuv420p', h264Profile: 'main', h264Level: '3.1', fps: '', maxFps: 30,
-    scale: sizes[job.devicePreset], fitScale: true, vbitrate: 2000, vrateMode: 'vbr',
-    maxrate: 3000, bufsize: 6000, abitrate: 128, channels: 2, sampleRate: 48000 };
+  const preset = DEVICE_PRESETS[job.devicePreset];
+  if (!preset) throw new Error('未知的设备预设');
+  // 预设表内的锁定参数覆盖旧表单值（format/vcodec/.../sampleRate）
+  return { ...job, ...preset };
 }
 
 function validateConvertOptions(job) {
@@ -297,12 +359,15 @@ function validateConvertOptions(job) {
     if (job.h264Profile || job.h264Level) {
       if (job.vcodec !== 'libx264') throw new Error('当前 Profile/Level 选项仅用于 H.264 (libx264)');
       if (job.h264Profile && !['baseline', 'main', 'high', 'high10'].includes(job.h264Profile)) throw new Error('不支持的 H.264 Profile');
-      if (job.h264Level && !['3.0', '3.1', '4.0', '4.1', '4.2', '5.0', '5.1', '5.2'].includes(job.h264Level)) throw new Error('不支持的 H.264 Level');
+      if (job.h264Level && !['2.1', '2.2', '3.0', '3.1', '4.0', '4.1', '4.2', '5.0', '5.1', '5.2'].includes(job.h264Level)) throw new Error('不支持的 H.264 Level');
       if (job.pixFmt === 'yuv420p10le' && ['baseline', 'main', 'high'].includes(job.h264Profile)) {
         throw new Error('所选 H.264 Profile 不支持 10-bit，请选择 8-bit 或 High 10');
       }
     }
-    if (job.fps && !['23.976', '24', '25', '29.97', '30', '50', '59.94', '60'].includes(String(job.fps))) throw new Error('不支持的帧率');
+    if (job.fps) {
+      const fpsNum = Number(job.fps);
+      if (!isFinite(fpsNum) || fpsNum <= 0 || fpsNum > 240) throw new Error('不支持的帧率，应为 1–240 之间的数字');
+    }
   }
   if (audio) {
     if (job.acodec === 'copy' && (job.channels || job.sampleRate)) throw new Error('直接复制音频不能改变声道或采样率');

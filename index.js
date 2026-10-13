@@ -42,6 +42,10 @@ function createWindow() {
 app.whenReady().then(() => {
   // 注册 ffmpeg 能力探测 / 文件选择 / 转换任务等 IPC
   require('./main/ffmpeg').registerIpc();
+  // 主题：先应用持久化设置（nativeTheme.themeSource），再注册切换 IPC
+  const theme = require('./main/theme');
+  theme.initTheme();
+  theme.registerThemeIpc();
 
   createWindow();
 

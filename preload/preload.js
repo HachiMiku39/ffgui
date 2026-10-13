@@ -63,4 +63,13 @@ contextBridge.exposeInMainWorld('ffgui', {
     const normalized = p.replace(/\\/g, '/');
     return 'file:///' + normalized;
   },
+
+  // 主题（跟随系统/浅色/深色）：持久化与全局生效在主进程，切换后所有页面自动换肤
+  getTheme: () => ipcRenderer.invoke('ffgui:theme-get'),
+  setTheme: (theme) => ipcRenderer.send('ffgui:theme-set', theme),
+  onThemeChanged: (callback) => {
+    const listener = (_event, theme) => callback(theme);
+    ipcRenderer.on('ffgui:theme-changed', listener);
+    return () => ipcRenderer.removeListener('ffgui:theme-changed', listener);
+  },
 });

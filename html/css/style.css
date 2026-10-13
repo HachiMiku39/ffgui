@@ -5,8 +5,34 @@
   --text-secondary: #747d8c;
   --border: #e4e7ee;
   --accent: #4a7dff;
+  --accent-hover: #3a6ae8;
+  --danger: var(--danger);
+  --input-bg: #ffffff;
+  --panel-bg: #fafbfc;
+  --hover-bg: #eef3ff;
+  --error-bg: #fee;
   --shadow: 0 2px 8px rgba(47, 53, 66, 0.06);
   --shadow-hover: 0 8px 24px rgba(74, 125, 255, 0.18);
+  color-scheme: light;
+}
+
+/* 深色主题：html/js/theme.js 按 prefers-color-scheme 在 <html> 上设置 data-theme */
+:root[data-theme="dark"] {
+  --bg: #181b22;
+  --card-bg: #21252f;
+  --text: #e2e6ee;
+  --text-secondary: #98a1b3;
+  --border: #363c49;
+  --accent: #5b8cff;
+  --accent-hover: #729bff;
+  --danger: #ff7a6e;
+  --input-bg: #262b35;
+  --panel-bg: #1d212a;
+  --hover-bg: #2a303c;
+  --error-bg: #3b2624;
+  --shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  --shadow-hover: 0 8px 24px rgba(91, 140, 255, 0.22);
+  color-scheme: dark;
 }
 
 * {
@@ -230,20 +256,20 @@ body {
 }
 
 .btn-primary:hover:not(:disabled) {
-  background: #3a6ae8;
+  background: var(--accent-hover);
   color: #fff;
 }
 
 .btn-danger {
-  border-color: #e74c3c;
-  color: #e74c3c;
+  border-color: var(--danger);
+  color: var(--danger);
   font-size: 14px;
   padding: 9px 28px;
 }
 
 .btn-danger:hover:not(:disabled) {
-  background: #e74c3c;
-  border-color: #e74c3c;
+  background: var(--danger);
+  border-color: var(--danger);
   color: #fff;
 }
 
@@ -289,7 +315,7 @@ body {
 
 .file-status.running { color: var(--accent); }
 .file-status.done { color: #00b894; }
-.file-status.error { color: #e74c3c; }
+.file-status.error { color: var(--danger); }
 
 .file-remove {
   flex-shrink: 0;
@@ -305,8 +331,8 @@ body {
 }
 
 .file-remove:hover {
-  background: #fee;
-  color: #e74c3c;
+  background: var(--error-bg);
+  color: var(--danger);
 }
 
 /* 表单 */
@@ -333,7 +359,7 @@ body {
   font-size: 13px;
   font-family: inherit;
   color: var(--text);
-  background: #fff;
+  background: var(--input-bg);
   border: 1px solid var(--border);
   border-radius: 8px;
   outline: none;
@@ -396,7 +422,7 @@ body {
   max-height: 160px;
   overflow-y: auto;
   padding: 10px 12px;
-  background: #fafbfc;
+  background: var(--panel-bg);
   border: 1px solid var(--border);
   border-radius: 8px;
   font-size: 12px;
@@ -524,7 +550,7 @@ body {
   font-size: 13px;
   font-family: inherit;
   color: var(--text);
-  background: #fff;
+  background: var(--input-bg);
   border: 1px solid var(--border);
   border-radius: 8px;
   outline: none;
@@ -536,7 +562,7 @@ body {
 }
 
 .form-item input.invalid {
-  border-color: #e74c3c;
+  border-color: var(--danger);
 }
 
 /* ---------- 合并页 ---------- */
@@ -564,7 +590,7 @@ body {
 }
 
 .merge-item.drop-target {
-  background: #eef3ff;
+  background: var(--hover-bg);
   outline: 1px dashed var(--accent);
   outline-offset: -1px;
 }
@@ -754,7 +780,7 @@ body {
   font-size: 13px;
   font-family: inherit;
   color: var(--text);
-  background: #fff;
+  background: var(--input-bg);
   border: 1px solid var(--border);
   border-radius: 8px;
   outline: none;
@@ -766,7 +792,7 @@ body {
 }
 
 .clip-range-item input.invalid {
-  border-color: #e74c3c;
+  border-color: var(--danger);
 }
 
 #btn-capture {
@@ -915,7 +941,7 @@ body {
   flex-direction: column;
   gap: 6px;
   padding: 8px;
-  background: #fff;
+  background: var(--card-bg);
   border: 1px solid var(--border);
   border-radius: 10px;
   cursor: pointer;
@@ -991,7 +1017,7 @@ body {
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  background: #e74c3c;
+  background: var(--danger);
   animation: record-pulse 1.2s ease-in-out infinite;
 }
 
@@ -1003,6 +1029,43 @@ body {
 .record-time {
   flex-shrink: 0;
   font-size: 14px;
-  color: #e74c3c;
+  color: var(--danger);
   font-variant-numeric: tabular-nums;
 }
+
+/* ---------- 主题切换按钮（html/js/theme.js 注入到每个页面右上角） ---------- */
+
+.theme-toggle {
+  position: fixed;
+  top: 14px;
+  right: 16px;
+  z-index: 60;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--card-bg);
+  color: var(--text-secondary);
+  cursor: pointer;
+  box-shadow: var(--shadow);
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.theme-toggle:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.theme-toggle svg {
+  width: 18px;
+  height: 18px;
+  display: none;
+}
+
+.theme-toggle[data-mode="system"] .icon-theme-system { display: block; }
+.theme-toggle[data-mode="light"] .icon-theme-light { display: block; }
+.theme-toggle[data-mode="dark"] .icon-theme-dark { display: block; }

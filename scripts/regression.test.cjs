@@ -284,6 +284,61 @@ test('截取保留毫秒时间，跨分钟进位和小于 1 秒的区间正确',
   for (const id of ['slider-start', 'slider-end']) assert.match(html, new RegExp(`id="${id}"[^>]*step="0.001"`));
 });
 
+test('主题：所有页面先加载 theme.js，样式与 preload 暴露主题 API', () => {
+  for (const page of ['index', 'convert', 'merge', 'clip', 'record']) {
+    const html = fs.readFileSync(path.join(repo, `html/${page}.html`), 'utf8');
+    const themeIdx = html.indexOf('js/theme.js');
+    const pageIdx = html.indexOf(`js/${page}.js`);
+    assert.ok(themeIdx !== -1 && pageIdx !== -1 && themeIdx < pageIdx, `${page}.html 须先加载 theme.js 再加载页面脚本`);
+  }
+  const css = fs.readFileSync(path.join(repo, 'html/css/style.css'), 'utf8');
+  assert.match(css, /:root\[data-theme="dark"\]/, '样式须含深色主题变量块');
+  assert.match(css, /\.theme-toggle/, '样式须含主题切换按钮');
+  const preload = fs.readFileSync(path.join(repo, 'preload/preload.js'), 'utf8');
+  for (const name of ['getTheme', 'setTheme', 'onThemeChanged']) {
+    assert.match(preload, new RegExp(`${name}:`), `preload 须暴露 ${name}`);
+  }
+});
+
+test('页面无内联 style 属性（CSP style-src \'self\' 不允许 inline）', () => {
+  for (const page of ['index', 'convert', 'merge', 'clip', 'record']) {
+    const html = fs.readFileSync(path.join(repo, `html/${page}.html`), 'utf8');
+    assert.ok(!html.includes('style="'), `${page}.html 不得含内联 style 属性`);
+  }
+});
+
+test('主题：主进程持久化设置、拒绝非法值并向所有窗口广播', () => {
+  const sent = [];
+  const electron = {
+    app: { getPath: () => temp },
+    BrowserWindow: { getAllWindows: () => [{ isDestroyed: () => false,
+      webContents: { send: (_ch, theme) => sent.push(theme) } }] },
+    ipcMain: { handle() {}, on() {} },
+    nativeTheme: {},
+  };
+  const handlers = {};
+  electron.ipcMain.handle = (ch, fn) => { handlers[ch] = fn; };
+  electron.ipcMain.on = (ch, fn) => { handlers[ch] = fn; };
+  const ctx = { require: (n) => (n === 'electron' ? electron : require(n)),
+    process, console: quiet, module: { exports: {} } };
+  vm.createContext(ctx);
+  vm.runInContext(fs.readFileSync(path.join(repo, 'main/theme.js'), 'utf8'), ctx);
+  const theme = ctx.module.exports;
+  theme.initTheme();
+  assert.equal(electron.nativeTheme.themeSource, 'system', '无持久化设置时默认为跟随系统');
+  theme.registerThemeIpc();
+  handlers['ffgui:theme-set']({}, 'neon');
+  assert.equal(electron.nativeTheme.themeSource, 'system', '非法主题值须被拒绝');
+  handlers['ffgui:theme-set']({}, 'dark');
+  assert.equal(electron.nativeTheme.themeSource, 'dark');
+  assert.deepEqual(sent, ['dark'], '切换后须向所有窗口广播');
+  const cfg = JSON.parse(fs.readFileSync(path.join(temp, 'config.json'), 'utf8'));
+  assert.equal(cfg.theme, 'dark', '主题设置须持久化到 config.json');
+  assert.equal(handlers['ffgui:theme-get'](), 'dark');
+  theme.initTheme();
+  assert.equal(electron.nativeTheme.themeSource, 'dark', '重启后应恢复持久化的主题');
+});
+
 // 以下覆盖实际输出文件，而不仅检查参数字符串。
 test('老设备预设：10-bit/60fps/6 声道输入转为 Main 3.1/8-bit/最高30fps/AAC双声道', () => {
   const input = path.join(temp, 'legacy-source.mkv');
@@ -315,11 +370,62 @@ test('老设备预设保留 23.976 fps；自定义可明确指定 8-bit、Profil
     ['film-preset', { devicePreset: 'ipod4-540' }, '24000/1001'],
     ['film-custom', { format: 'mp4', vcodec: 'libx264', acodec: 'aac', pixFmt: 'yuv420p',
       h264Profile: 'baseline', h264Level: '3.1', fps: '25', scale: { w: 320, h: 180 } }, '25/1'],
+    ['film-custom-15fps', { format: 'mp4', vcodec: 'libx264', acodec: 'aac', pixFmt: 'yuv420p',
+      fps: '15', scale: { w: 320, h: 180 } }, '15/1'],
   ]) {
     const out = path.join(temp, `${name}.mp4`); execute(api.buildArgs(job, input, out));
     const v = probe(out).streams.find((s) => s.codec_type === 'video');
     assert.equal(v.pix_fmt, 'yuv420p'); assert.equal(v.avg_frame_rate, expected);
   }
+});
+
+test('设备/平台预设：按表锁定 Profile/Level/分辨率/码率，覆盖表单旧值', () => {
+  const cases = {
+    'bili-1080p': { profile: 'high', level: '4.2', scale: '1920:1080', v: '6000', maxrate: '12000', bufsize: '24000', a: '320', ar: '48000', fpsmax: '60' },
+    'bili-720p': { profile: 'high', level: '3.1', scale: '1280:720', v: '3000', maxrate: '6000', bufsize: '12000', a: '192', ar: '48000', fpsmax: '30' },
+    'douyin-1080p': { profile: 'high', level: '4.2', scale: '1920:1080', v: '6000', maxrate: '12000', bufsize: '24000', a: '192', ar: '48000', fpsmax: '60' },
+    'wechat-1080p': { profile: 'high', level: '4.0', scale: '1920:1080', v: '4000', maxrate: '8000', bufsize: '16000', a: '128', ar: '48000', fpsmax: '30' },
+    'youtube-1080p': { profile: 'high', level: '4.2', scale: '1920:1080', v: '8000', maxrate: '12000', bufsize: '24000', a: '384', ar: '48000', fpsmax: '60' },
+    'iphone4s': { profile: 'high', level: '4.0', scale: '1920:1080', v: '4000', maxrate: '8000', bufsize: '16000', a: '160', ar: '48000', fpsmax: '30' },
+    'psp': { profile: 'main', level: '2.2', scale: '480:272', v: '1000', maxrate: '1500', bufsize: '3000', a: '128', ar: '48000', fpsmax: '30' },
+    'android-legacy': { profile: 'baseline', level: '2.1', scale: '800:480', v: '1000', maxrate: '1500', bufsize: '3000', a: '128', ar: '44100', fpsmax: '30' },
+    'web-safe': { profile: 'baseline', level: '3.0', scale: '1280:720', v: '2500', maxrate: '5000', bufsize: '10000', a: '128', ar: '44100', fpsmax: '30' },
+    'tv-4k': { profile: 'high', level: '5.1', scale: '3840:2160', v: '20000', maxrate: '40000', bufsize: '60000', a: '192', ar: '48000', fpsmax: '30' },
+  };
+  for (const [preset, e] of Object.entries(cases)) {
+    // 表单残留旧值（复制流 / 10-bit）必须被预设表完整覆盖
+    const args = api.buildArgs({ devicePreset: preset, vcodec: 'copy', pixFmt: 'yuv420p10le' },
+      dual, path.join(temp, `preset-${preset}.mp4`));
+    const argStr = args.join(' ');
+    assert.ok(argStr.includes(`-c:v libx264`) && argStr.includes(`-pix_fmt yuv420p`), `${preset} 编码器/位深`);
+    assert.ok(argStr.includes(`-profile:v ${e.profile}`) && argStr.includes(`-level:v ${e.level}`), `${preset} Profile/Level`);
+    assert.ok(argStr.includes(`scale=${e.scale}:`), `${preset} 分辨率`);
+    assert.ok(argStr.includes(`-b:v ${e.v}k`) && argStr.includes(`-maxrate ${e.maxrate}k`)
+      && argStr.includes(`-bufsize ${e.bufsize}k`), `${preset} 视频码率`);
+    assert.ok(argStr.includes(`-b:a ${e.a}k`) && argStr.includes(`-ar ${e.ar}`), `${preset} 音频`);
+    assert.ok(argStr.includes(`-fpsmax ${e.fpsmax}`), `${preset} 帧率上限`);
+  }
+  // 渲染层预设表与主进程预设表键一致，防止下拉选项与落实参数脱节
+  const mainSrc = fs.readFileSync(path.join(repo, 'main/ffmpeg.js'), 'utf8');
+  const uiSrc = fs.readFileSync(path.join(repo, 'html/js/convert.js'), 'utf8');
+  const keys = [...mainSrc.matchAll(/^  '([\w-]+)': \{ format: 'mp4'/gm)].map((m) => m[1]);
+  assert.ok(keys.length >= 12, '主进程预设表应含全部预设');
+  for (const k of keys) assert.ok(uiSrc.includes(` '${k}':`), `渲染层缺预设 ${k}`);
+});
+
+test('PSP 预设真实转码：480×272 / Main 2.2 / AAC 48 kHz', () => {
+  const out = path.join(temp, 'psp-real.mp4');
+  execute(api.buildArgs({ devicePreset: 'psp' }, dual, out));
+  const ss = probe(out).streams;
+  const v = ss.find((s) => s.codec_type === 'video');
+  assert.equal(v.profile, 'Main');
+  assert.equal(v.level, 22, 'Level 2.2 的 level_idc 为 22');
+  assert.ok(v.width <= 480 && v.height <= 272);
+  const [n, d] = v.avg_frame_rate.split('/').map(Number);
+  assert.ok(n / d <= 30.001, 'fpsmax 30 应封顶帧率');
+  const a = ss.find((s) => s.codec_type === 'audio');
+  assert.equal(a.codec_name, 'aac');
+  assert.equal(a.sample_rate, '48000');
 });
 
 test('拦截复制流与转换参数的冲突、无效预设和不兼容 Profile/位深', () => {
@@ -329,6 +435,9 @@ test('拦截复制流与转换参数的冲突、无效预设和不兼容 Profile
     { vcodec: 'libx265', h264Profile: 'main' },
     { vcodec: 'libx264', h264Profile: 'main', pixFmt: 'yuv420p10le' },
     { vcodec: 'libx264', h264Level: 'invalid' },
+    { vcodec: 'libx264', fps: 'abc' },
+    { vcodec: 'libx264', fps: '0' },
+    { vcodec: 'libx264', fps: '300' },
     { acodec: 'copy', channels: 2 },
     { acodec: 'aac', sampleRate: 'bad' },
     { devicePreset: 'unknown' },

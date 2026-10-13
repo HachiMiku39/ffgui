@@ -20,8 +20,14 @@ FFGui 是一个基于 Electron 的桌面音视频工具箱（GUI for FFmpeg）�
 
 ```
 index.js            主进程入口：创建 BrowserWindow（1080x720，contextIsolation: true，
-                    nodeIntegration: false），app ready 后调用 main/ffmpeg.registerIpc()；
+                    nodeIntegration: false），app ready 后调用 main/ffmpeg.registerIpc()
+                    与 main/theme（initTheme 应用持久化主题 + registerThemeIpc）；
                     开发模式自动开 DevTools，打包后拦截 devtools-opened 强制关闭
+main/theme.js       主题设置：持久化用户选择（system/light/dark）到
+                    userData/config.json 的 theme 字段，经 nativeTheme.themeSource
+                    强制 prefers-color-scheme 全局生效；IPC：ffgui:theme-get /
+                    ffgui:theme-set（校验合法性 → 持久化 → 改 themeSource →
+                    向所有窗口广播 ffgui:theme-changed）
 main/ffmpeg.js      主进程核心：
                     - getFfmpegPath：Windows 用 bin/ffmpeg.exe（开发读项目根、打包读
                       resources/bin/，按 app.isPackaged 区分）；macOS 优先内置
@@ -41,14 +47,31 @@ main/ffmpeg.js      主进程核心：
                       推送 file-start / progress / file-done / file-warning /
                       file-error 事件
                       （spawn/日志/进度解析封装在 runFfmpegTask，转码、合并、截取、
-                      预览、录屏转 MP4 共用）；设备预设（job.devicePreset，如 ipod4-540/720）
-                      在主进程由 normalizeConvertJob 二次落实（不能被旧表单值
-                      覆盖，须在分配输出扩展名前调用），锁定 MP4/libx264
-                      Main 3.1/8-bit/最高 30 fps/AAC-LC 双声道 + VBV + faststart；
-                      自定义高级参数（像素格式、Profile/Level、固定帧率、声道、
+                      预览、录屏转 MP4 共用）；设备预设（job.devicePreset）在主进程由
+                      normalizeConvertJob 按 DEVICE_PRESETS 表二次落实（不能被旧
+                      表单值覆盖，须在分配输出扩展名前调用），每个预设锁定
+                      格式/编码器/Profile/Level/位深/帧率上限/分辨率/VBV 码率
+                      三件套/音频码率/声道/采样率；预设清单（渲染层 convert.js
+                      有同名表负责填表单与提示文案，键须一一对应）：
+                      在线平台 bili-1080p（High 4.2/60fps/6000k 峰值 12000/
+                      AAC 320k，B站免二压均值上限 6000）、bili-720p（High 3.1/
+                      3000k/AAC 192k）、douyin-1080p（High 4.2/60fps/6000k/
+                      AAC 192k）、wechat-1080p（High 4.0/4000k/AAC 128k）、
+                      youtube-1080p（High 4.2/60fps/8000k 峰值 12000/AAC 384k）；
+                      老设备 ipod4-540/ipod4-720（Main 3.1/30fps/2000k/AAC 128k）、
+                      iphone4s（High 4.0/1080p30/4000k/AAC 160k，Apple 官方
+                      1080p 播放上限）、psp（Main 2.2/480x272/1000k）、
+                      android-legacy（Baseline 2.1/800x480/1000k/44.1kHz）；
+                      通用 web-safe（Baseline 3.0/720p/2500k）、tv-4k（High 5.1/
+                      2160p30/20000k 峰值 40000/AAC 192k，兼 B站 4K）；
+                      全部为 MP4/libx264/yuv420p/保持比例/AAC-LC 双声道 + VBV +
+                      faststart，默认第 1 音轨；H.264 Level 白名单含 2.1–5.2；
+                      自定义高级参数（像素格式、Profile/Level、声道、
                       采样率、ID3 版本、标签/封面开关、30 秒试转）由
-                      validateConvertOptions 白名单校验，复制流与转码参数冲突
-                      直接报错；纯音频输出（MP3/M4A/FLAC）默认保留内嵌封面：
+                      validateConvertOptions 白名单校验；固定帧率开放手填数字
+                      （UI 为 input+datalist 快捷选项），主进程按 1–240 数值范围
+                      校验（23.976/29.97/59.94 仍映射 24000/1001 等分数），
+                      复制流与转码参数冲突直接报错；纯音频输出（MP3/M4A/FLAC）默认保留内嵌封面：
                       probeFile 返回 covers[]（attached pic 的流编号与编码），
                       只显式映射封面流，JPEG/PNG 原样复制、其他转 mjpeg，
                       多张封面保留类型；WAV/OGG/OPUS 不保留封面，仅发
@@ -124,7 +147,8 @@ preload/preload.js  通过 contextBridge 暴露 window.ffgui（platform、versio
                     probeMedia、merge、pickSubtitle、probeSubtitle、clip、
                     makePreview、captureFrame、recordPickOutput、recordStart、
                     recordWriteChunk、recordFinish、recordDiscard、recordRemux、
-                    getDesktopSources、prepareDesktopSource、pathToFileUrl）
+                    getDesktopSources、prepareDesktopSource、pathToFileUrl、
+                    getTheme、setTheme、onThemeChanged）
 html/index.html     首页（功能导航卡片 + "清除硬件信息缓存"按钮）
 html/convert.html   转码页
 html/merge.html     合并页（队列拖动排序、混合队列黑屏段拼接、可拖入一个字幕文件）
@@ -132,10 +156,18 @@ html/clip.html      截取页（CSP 额外放行 media-src blob: file: 以播放
 html/record.html    录屏页（CSP 同 clip.html 另放行 img-src data: 展示来源缩略图；
                     来源选择弹窗、声音勾选、实时预览、计时录制、结果一键转 MP4）
 html/js/index.js    首页视图切换与清缓存逻辑
+html/js/theme.js    全局主题：所有页面最先加载（须先于各页面脚本），监听
+                    matchMedia('(prefers-color-scheme: dark)') 在 <html> 上设置
+                    data-theme=light/dark（themeSource 变化与系统切换都会触发
+                    change，覆盖 跟随系统/浅色/深色 三种状态）；并向每个页面
+                    右上角注入主题切换按钮（跟随系统 → 浅色 → 深色 循环，
+                    图标按 data-mode 显隐，经 ffgui:getTheme/setTheme 同步）
 html/js/convert.js  转码页全部逻辑：候选格式/编码器清单是硬编码的，但会按主进程
-                    探测到的真实能力过滤后填充下拉框；设备预设选中时锁定并填写
-                    兼容参数（切回自定义时恢复原设置），纯音频格式自动隐藏视频
-                    相关表单项，提交前校验分辨率格式
+                    探测到的真实能力过滤后填充下拉框；设备预设按 DEVICE_PRESETS
+                    表锁定并填写兼容参数（切回自定义时恢复原设置，预设提示文案
+                    与帧率标签随预设变化），纯音频格式自动隐藏视频
+                    相关表单项，提交前校验分辨率与帧率格式（帧率可手填 1–240
+                    的数字，留空保持源帧率）
 html/js/merge.js    合并页全部逻辑：字幕单槽位拖放（拖到拼接队列区域的字幕文件会
                     自动转投字幕槽位），开始前校验字幕时长与合并总时长，
                     相差超过 10 秒才弹警告由用户确认（容差 ±10 秒内视为匹配）
