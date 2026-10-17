@@ -42,6 +42,26 @@ function probe(file) {
   return JSON.parse(cp.execFileSync(ffprobe, ['-v', 'error', '-show_streams', '-show_format', '-of', 'json', file]));
 }
 function audios(file) { return probe(file).streams.filter((s) => s.codec_type === 'audio'); }
+function dims(file) {
+  const v = probe(file).streams.find((s) => s.codec_type === 'video');
+  return [v.width, v.height];
+}
+// 取指定位置的像素（RGB），用于验证 crop 的 x/y 偏移真的生效（尺寸正确不代表区域正确）
+function pixelAt(file, x, y) {
+  const [w] = dims(file);
+  const buf = cp.execFileSync(ffmpeg, ['-v', 'error', '-i', file, '-frames:v', '1',
+    '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], { maxBuffer: 4 * 1024 * 1024 });
+  assert.ok(buf.length >= w * 3, '必须实际解码出画面');
+  const i = (y * w + x) * 3;
+  return [buf[i], buf[i + 1], buf[i + 2]];
+}
+// 编码有损，纯色也会有少量偏差，逐通道允许小误差
+function nearPixel(file, x, y, expect, tol = 4) {
+  const px = pixelAt(file, x, y);
+  expect.forEach((v, i) => assert.ok(Math.abs(px[i] - v) <= tol,
+    `像素 (${x},${y}) 通道 ${i} 期望 ${v}±${tol}，实际 ${px[i]}`));
+  return px;
+}
 function decode(file, track, start = 0.2, duration = 0.3) {
   return cp.execFileSync(ffmpeg, ['-v', 'error', '-i', file, '-ss', String(start), '-map', `0:a:${track}`,
     '-t', String(duration), '-ac', '1', '-ar', '8000', '-f', 'f32le', '-'], { maxBuffer: 8 * 1024 * 1024 });
@@ -548,4 +568,233 @@ test('多个封面保留类型，JPEG 原样复制，WebP 封面转换为兼容�
   const covers = probe(out).streams.filter((s) => s.disposition?.attached_pic);
   assert.deepEqual(covers.map((s) => s.codec_name), ['png', 'mjpeg', 'mjpeg']);
   assert.equal(covers[1].tags.comment, 'Cover (back)');
+});
+
+// 以下覆盖实际输出文件，而不仅检查参数字符串。
+test('可视化裁剪：归一化矩形校验，非法值一律拒绝、合法边界可接受', async () => {
+  const base = { format: 'mp4', vcodec: 'libx264', acodec: 'aac' };
+  const reject = (crop) => assert.throws(() => api.buildArgs({ ...base, crop }, dual, 'unused.mp4'),
+    /裁剪区域/, `应拒绝 ${JSON.stringify(crop)}`);
+  // 缺字段：w/h 缺失、只有宽高没有起点
+  for (const crop of [
+    { x: 0, y: 0, w: 0.5 },
+    { x: 0, y: 0, h: 0.5 },
+    { x: 0.25, y: 0.25, w: 0.5 },
+    { x: 0.25, y: 0.25, h: 0.5 },
+    { w: 0.5, h: 0.5 },
+    {},
+  ]) reject(crop);
+  // 字符串、NaN、Infinity、null 字段、数组、标量
+  for (const crop of [
+    { x: '0.25', y: 0.25, w: 0.5, h: 0.5 },
+    { x: 0.25, y: '0.25', w: 0.5, h: 0.5 },
+    { x: 0.25, y: 0.25, w: '0.5', h: 0.5 },
+    { x: 0.25, y: 0.25, w: 0.5, h: '0.5' },
+    { x: NaN, y: 0.25, w: 0.5, h: 0.5 },
+    { x: 0.25, y: Infinity, w: 0.5, h: 0.5 },
+    { x: 0.25, y: -Infinity, w: 0.5, h: 0.5 },
+    { x: 0.25, y: 0.25, w: NaN, h: 0.5 },
+    { x: 0.25, y: 0.25, w: Infinity, h: 0.5 },
+    { x: 0.25, y: 0.25, w: 0.5, h: null },
+    { x: 0.25, y: 0.25, w: 0.5, h: undefined },
+    [0.25, 0.25, 0.5, 0.5],
+    'x=0.25',
+    0.25,
+    true,
+  ]) reject(crop);
+  // 负数起点
+  for (const crop of [
+    { x: -0.1, y: 0.25, w: 0.5, h: 0.5 },
+    { x: 0.25, y: -0.1, w: 0.5, h: 0.5 },
+    { x: -1e-9, y: 0, w: 0.5, h: 0.5 },
+    { x: 0, y: -1e-9, w: 0.5, h: 0.5 },
+  ]) reject(crop);
+  // 零/负宽高
+  for (const crop of [
+    { x: 0.25, y: 0.25, w: 0, h: 0.5 },
+    { x: 0.25, y: 0.25, w: 0.5, h: 0 },
+    { x: 0.25, y: 0.25, w: -0.2, h: 0.5 },
+    { x: 0.25, y: 0.25, w: 0.5, h: -0.2 },
+  ]) reject(crop);
+  // 超出 1
+  for (const crop of [
+    { x: 0.75, y: 0.25, w: 0.5, h: 0.5 },
+    { x: 0.25, y: 0.75, w: 0.5, h: 0.5 },
+    { x: 0.5, y: 0.5, w: 0.6, h: 0.4 },
+    { x: 1.5, y: 0, w: 0.5, h: 0.5 },
+    { x: 0, y: 0, w: 1.5, h: 1 },
+    { x: 0, y: 0, w: 1, h: 1.0001 },
+  ]) reject(crop);
+  // 合法边界可接受：整幅画面、常见比例、浮点求和误差在容差内、极小区域
+  for (const crop of [
+    { x: 0, y: 0, w: 1, h: 1 },
+    { x: 0.25, y: 0.25, w: 0.5, h: 0.5 },
+    { x: 0.1, y: 0.2, w: 0.3, h: 0.8 },
+    { x: 0.999999, y: 0, w: 1e-6, h: 1 },
+    { x: 0.1 + 0.2, y: 0, w: 0.7 - (0.1 + 0.2), h: 0.5 },
+    { x: 0, y: 0, w: 0.3, h: 1 },
+  ]) {
+    const args = api.buildArgs({ ...base, crop }, dual, 'unused.mp4');
+    assert.match(args[args.indexOf('-vf') + 1], /^crop=/, `合法 crop 应进入滤镜链：${JSON.stringify(crop)}`);
+  }
+  // 无 crop 时不产生滤镜链，也不报错
+  for (const crop of [null, undefined]) {
+    const args = api.buildArgs({ ...base, crop }, dual, 'unused.mp4');
+    assert.equal(args.indexOf('-vf'), -1);
+  }
+  // 表达式只含数字与 crop/trunc/max/min/in_w 等标识符，绝不夹带未校验字符串；
+  // 滤镜选项值内的逗号必须转义为 "\,"，否则会被当成滤镜分隔符
+  const vf = api.buildArgs({ ...base, crop: { x: 0.1, y: 0.2, w: 0.3, h: 0.4 } }, dual, 'unused.mp4')
+    .slice(api.buildArgs({ ...base, crop: { x: 0.1, y: 0.2, w: 0.3, h: 0.4 } }, dual, 'unused.mp4').indexOf('-vf') + 1)[0];
+  assert.equal(vf, 'crop=w=max(2\\,trunc(in_w*0.3/2)*2):h=max(2\\,trunc(in_h*0.4/2)*2)'
+    + ':x=max(0\\,min(trunc(in_w*0.1)\\,in_w-out_w)):y=max(0\\,min(trunc(in_h*0.2)\\,in_h-out_h))');
+  // 极小选框也必须是合法表达式：w/h 用 max(2,...) 兜底，不会取偶成 0
+  const tinyVf = api.buildArgs({ ...base, crop: { x: 0.999999, y: 0, w: 1e-6, h: 1 } }, dual, 'unused.mp4')
+    .slice(api.buildArgs({ ...base, crop: { x: 0.999999, y: 0, w: 1e-6, h: 1 } }, dual, 'unused.mp4').indexOf('-vf') + 1)[0];
+  assert.match(tinyVf, /w=max\(2\\,trunc\(in_w\*0\.000001\/2\)\*2\)/, `极小宽兜底：${tinyVf}`);
+  assert.match(tinyVf, /x=max\(0\\,min\(trunc\(in_w\*0\.999999\)\\,in_w-out_w\)\)/, `x 钳制：${tinyVf}`);
+});
+
+test('裁剪实际执行：按比例换算成像素，区域与尺寸都正确', async () => {
+  // 160x120 输入，右上四分之一叠一块纯红，便于验证 x/y 偏移确实生效
+  const input = path.join(temp, 'crop-source.mkv');
+  const red = path.join(temp, 'crop-red.png');
+  execute(['-n', '-f', 'lavfi', '-i', 'color=c=red:s=80x60:r=10:d=0.5', '-frames:v', '1', red]);
+  execute(['-n', '-i', dual, '-i', red, '-filter_complex', '[0:v][1:v]overlay=x=80:y=0[v]',
+    '-map', '[v]', '-c:v', 'libx264', '-g', '1', '-pix_fmt', 'yuv420p', input]);
+  assert.deepEqual(dims(input), [160, 120]);
+  const isRed = (px) => px[0] > 200 && px[1] < 30 && px[2] < 30;
+  const originRed = pixelAt(input, 100, 10);
+  assert.ok(isRed(originRed), `原片右上角应为红色，实际 ${JSON.stringify(originRed)}`);
+  const originBlack = pixelAt(input, 10, 10);
+  assert.ok(!isRed(originBlack), '原片左上角应保持原画面');
+  const base = { format: 'mkv', vcodec: 'libx264', acodec: 'aac' };
+  // 取右上 50%/50%：160x120 -> 80x60，且左上角像素落在红色叠加区
+  const out = path.join(temp, 'crop-half.mkv');
+  execute(api.buildArgs({ ...base, crop: { x: 0.5, y: 0, w: 0.5, h: 0.5 } }, input, out));
+  assert.deepEqual(dims(out), [80, 60], 'crop 50%/50% 应为 80x60');
+  assert.ok(isRed(pixelAt(out, 20, 20)), '右上角裁剪结果应落在红色叠加区');
+  // 取左下 50%/50%：尺寸同为 80x60，但左上角像素应回到原画面（非红色叠加区）
+  const out2 = path.join(temp, 'crop-quarter.mkv');
+  execute(api.buildArgs({ ...base, crop: { x: 0, y: 0.5, w: 0.5, h: 0.5 } }, input, out2));
+  assert.deepEqual(dims(out2), [80, 60]);
+  assert.ok(!isRed(pixelAt(out2, 20, 20)), '左下角裁剪结果不应落在红色叠加区');
+  // 非整数比例：33%/67% -> trunc(160*0.33/2)*2=52, trunc(120*0.67/2)*2=80
+  const out3 = path.join(temp, 'crop-odd.mkv');
+  execute(api.buildArgs({ ...base, crop: { x: 0.5, y: 0, w: 0.33, h: 0.67 } }, input, out3));
+  assert.deepEqual(dims(out3), [52, 80], '宽高应按比例换算后向下取偶数');
+  // 任务入口同样生效（runJob 经 normalizeConvertJob 后 crop 仍被保留）
+  const events = [];
+  const result = await api.runJob({ isDestroyed: () => false, send: (_, e) => events.push(e) },
+    { inputs: [input], outputDir: temp, format: 'mkv', vcodec: 'libx264', acodec: 'aac',
+      crop: { x: 0.25, y: 0.25, w: 0.5, h: 0.5 } });
+  assert.equal(result.done, 1, JSON.stringify(events));
+  assert.deepEqual(dims(events.find((e) => e.type === 'file-done').output), [80, 60]);
+  // 设备预设下 crop 同样保留（normalizeConvertJob spread 不能丢掉 crop）
+  const presetEvents = [];
+  const presetResult = await api.runJob({ isDestroyed: () => false, send: (_, e) => presetEvents.push(e) },
+    { inputs: [input], outputDir: temp, format: 'mp4', devicePreset: 'ipod4-540',
+      crop: { x: 0.5, y: 0, w: 0.5, h: 1 } });
+  assert.equal(presetResult.done, 1, JSON.stringify(presetEvents));
+  const presetOut = presetEvents.find((e) => e.type === 'file-done').output;
+  // 裁到右半边整幅高度得到 80x120（2:3），等比放进 960x540 后为 360x540；
+  // 若 crop 被 normalizeConvertJob 丢掉，4:3 的 160x120 会得到 720x540
+  assert.deepEqual(dims(presetOut), [360, 540], 'crop 必须在设备预设下依然生效');
+});
+
+test('裁剪与缩放同用：crop 必须位于 scale 之前，输出尺寸以缩放为准', () => {
+  const input = path.join(temp, 'crop-scale.mkv');
+  execute(['-n', '-i', dual, '-vf', 'pad=320:240:0:0', '-c:v', 'libx264', '-g', '1', input]);
+  assert.deepEqual(dims(input), [320, 240]);
+  const base = { format: 'mkv', vcodec: 'libx264', acodec: 'aac', crop: { x: 0, y: 0, w: 0.25, h: 0.25 } };
+  // 指定尺寸：裁剪到 80x60 后强制缩放到 200x200
+  const out = path.join(temp, 'crop-scale-out.mkv');
+  const args = api.buildArgs({ ...base, scale: { w: 200, h: 200 } }, input, out);
+  const vf = args[args.indexOf('-vf') + 1];
+  assert.ok(vf.indexOf('crop=') < vf.indexOf('scale='), `crop 必须位于 scale 之前：${vf}`);
+  execute(args);
+  assert.deepEqual(dims(out), [200, 200]);
+  // 百分比缩放：先裁到 80x60 再缩 50% 得到 40x30。
+  // 若 crop 被放到 scale 之后，比例会按 320x240 计算成 160x120 再缩半得 80x60，
+  // 因此该断言能真正区分两种顺序
+  const out2 = path.join(temp, 'crop-scale-percent.mkv');
+  const args2 = api.buildArgs({ ...base, scale: { percent: 50 } }, input, out2);
+  const vf2 = args2[args2.indexOf('-vf') + 1];
+  assert.ok(vf2.indexOf('crop=') < vf2.indexOf('scale='), `crop 必须位于 scale 之前：${vf2}`);
+  execute(args2);
+  assert.deepEqual(dims(out2), [40, 30], '先裁剪到 80x60 再缩 50% 应为 40x30');
+});
+
+test('极小合法选框：宽高兜底为 2 且边缘不越界，普通选框结果不变', async () => {
+  // 100x100 输入 + 1% 选框：trunc(100*0.01/2)*2 会取偶成 0，旧实现直接报
+  // "Invalid too big or non positive size"，这里必须实际执行成功并得到 2 像素
+  const input = path.join(temp, 'crop-tiny-src.mkv');
+  execute(['-n', '-f', 'lavfi', '-i', 'color=c=red:s=100x100:r=10:d=0.5', '-c:v', 'libx264',
+    '-pix_fmt', 'yuv420p', input]);
+  assert.deepEqual(dims(input), [100, 100]);
+  const base = { format: 'mkv', vcodec: 'libx264', acodec: 'aac' };
+  // 先证明旧表达式确实会失败（否则兜底就没有意义）
+  const broken = execute(['-n', '-i', input, '-vf',
+    'crop=w=trunc(in_w*0.01/2)*2:h=trunc(in_h*0.01/2)*2:x=0:y=0',
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', path.join(temp, 'crop-tiny-broken.mkv')], false);
+  assert.notEqual(broken.status, 0, '取偶成 0 的表达式必须失败');
+  assert.match(broken.stderr, /non positive size/);
+  // 1% 极小框：宽高兜底为 2，位置在原点
+  const out = path.join(temp, 'crop-tiny-1pct.mkv');
+  execute(api.buildArgs({ ...base, crop: { x: 0, y: 0, w: 0.01, h: 0.01 } }, input, out));
+  assert.deepEqual(dims(out), [2, 2], '极小选框宽高必须兜底为 2');
+  nearPixel(out, 0, 0, [255, 0, 0]);
+  // 右下边缘极小框：x=0.999999 -> trunc(100*0.999999)=99，w 兜底为 2，
+  // x 被钳制到 in_w-out_w = 98，最终 2x2 且不越界
+  const out2 = path.join(temp, 'crop-tiny-edge.mkv');
+  execute(api.buildArgs({ ...base, crop: { x: 0.999999, y: 0.999999, w: 1e-6, h: 1e-6 } }, input, out2));
+  assert.deepEqual(dims(out2), [2, 2], '右下边缘极小框必须兜底为 2');
+  nearPixel(out2, 1, 1, [255, 0, 0]);
+  // 160x120 上右/下边缘极小框：w/h 兜底为 2，高度保持 120
+  for (const [name, crop, expected] of [
+    ['crop-tiny-right', { x: 0.999999, y: 0, w: 1e-6, h: 1 }, [2, 120]],
+    ['crop-tiny-bottom', { x: 0, y: 0.999999, w: 1, h: 1e-6 }, [160, 2]],
+    ['crop-tiny-both', { x: 0.999999, y: 0.999999, w: 1e-6, h: 1e-6 }, [2, 2]],
+  ]) {
+    const o = path.join(temp, `${name}.mkv`);
+    execute(api.buildArgs({ ...base, crop }, dual, o));
+    assert.deepEqual(dims(o), expected, `${name} 应为 ${expected.join('x')}`);
+    assert.ok(pixelAt(o, expected[0] - 1, expected[1] - 1).length === 3, '右下角像素必须存在');
+  }
+  // 普通选框结果不变：50% -> 80x60、33%/67% -> 52x80
+  for (const [crop, expected] of [
+    [{ x: 0.25, y: 0.25, w: 0.5, h: 0.5 }, [80, 60]],
+    [{ x: 0.5, y: 0, w: 0.33, h: 0.67 }, [52, 80]],
+    [{ x: 0, y: 0, w: 1, h: 1 }, [160, 120]],
+  ]) {
+    const o = path.join(temp, `crop-tiny-normal-${expected.join('x')}.mkv`);
+    execute(api.buildArgs({ ...base, crop }, dual, o));
+    assert.deepEqual(dims(o), expected, `普通选框 ${JSON.stringify(crop)} 应仍为 ${expected.join('x')}`);
+  }
+});
+
+test('裁剪与直接复制视频流同存必须报错，无 crop 时复制不受影响', () => {
+  for (const crop of [
+    { x: 0.25, y: 0.25, w: 0.5, h: 0.5 },
+    { x: 0, y: 0, w: 1, h: 1 },
+  ]) {
+    assert.throws(() => api.buildArgs({ format: 'mkv', vcodec: 'copy', acodec: 'copy', crop }, dual, 'unused.mp4'),
+      /直接复制视频不能裁剪/);
+  }
+  const out = path.join(temp, 'copy-no-crop.mkv');
+  execute(api.buildArgs({ format: 'mkv', vcodec: 'copy', acodec: 'copy' }, dual, out));
+  assert.deepEqual(dims(out), [160, 120]);
+  // 纯音频输出下 crop 被忽略，不报错也不影响音频转换
+  const audioOut = path.join(temp, 'crop-audio-only.m4a');
+  execute(api.buildArgs({ format: 'm4a', vcodec: 'none', acodec: 'aac',
+    crop: { x: 0.25, y: 0.25, w: 0.5, h: 0.5 } }, dual, audioOut));
+  assert.equal(audios(audioOut).length, 2);
+  // 无视频流（vcodec none）时同样忽略 crop
+  const noneOut = path.join(temp, 'crop-no-video.mp4');
+  execute(api.buildArgs({ format: 'mp4', vcodec: 'none', acodec: 'aac',
+    crop: { x: 0.25, y: 0.25, w: 0.5, h: 0.5 } }, dual, noneOut));
+  assert.deepEqual(probe(noneOut).streams.map((s) => s.codec_type), ['audio', 'audio']);
+  // 非法 crop 即使在纯音频分支也应拒绝（校验不依赖输出类型）
+  assert.throws(() => api.buildArgs({ format: 'm4a', vcodec: 'none', acodec: 'aac',
+    crop: { x: 0, y: 0, w: 0.5 } }, dual, 'unused.mp4'), /裁剪区域/);
 });

@@ -4,6 +4,7 @@
     convert: '音视频转码',
     merge: '音视频合并',
     clip: '音视频截取',
+    crop: '画面裁剪',
     record: '屏幕录制',
   };
 
@@ -25,6 +26,10 @@
     }
     if (feature === 'clip') {
       window.location.href = 'clip.html';
+      return;
+    }
+    if (feature === 'crop') {
+      window.location.href = 'crop.html';
       return;
     }
     if (feature === 'record') {

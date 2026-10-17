@@ -127,6 +127,7 @@ body {
 .icon-convert { background: linear-gradient(135deg, #4a7dff, #6c5ce7); }
 .icon-merge   { background: linear-gradient(135deg, #00b894, #00cec9); }
 .icon-clip    { background: linear-gradient(135deg, #e17055, #fdcb6e); }
+.icon-crop    { background: linear-gradient(135deg, #0984e3, #74b9ff); }
 .icon-record  { background: linear-gradient(135deg, #e84393, #fd79a8); }
 
 .card-title {
@@ -1069,3 +1070,92 @@ body {
 .theme-toggle[data-mode="system"] .icon-theme-system { display: block; }
 .theme-toggle[data-mode="light"] .icon-theme-light { display: block; }
 .theme-toggle[data-mode="dark"] .icon-theme-dark { display: block; }
+
+/* ---------- 画面裁剪页 ---------- */
+
+.crop-view {
+  max-width: 860px;
+}
+
+/* 舞台：<video> 与 canvas 同处一个层叠上下文，canvas 绝对定位覆盖视频 */
+.crop-stage {
+  position: relative;
+  background: #000;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.crop-stage video {
+  display: block;
+  width: 100%;
+  max-height: 460px;
+  margin: 0 auto;
+  /* 保持宽高比，JS 按 videoWidth/videoHeight 算出不含黑边的帧矩形 */
+  object-fit: contain;
+}
+
+/* canvas 位置/尺寸由 JS 按 object-fit: contain 后的真实帧矩形写入（排除黑边） */
+.crop-stage canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+/* 非绘制模式下事件穿透，点击画面仍走 video 的播放/暂停 */
+.crop-stage canvas:not(.drawing) {
+  pointer-events: none;
+  cursor: default;
+}
+
+.crop-stage canvas.drawing {
+  outline: 1px dashed rgba(255, 255, 255, 0.5);
+  outline-offset: -1px;
+}
+
+/* 画框提示：仅在绘制模式且暂无选框时显示 */
+.crop-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  font-size: 12px;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.crop-hint.hidden {
+  display: none;
+}
+
+.crop-tool-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+
+/* 绘制模式下的按钮高亮（与播放/暂停按钮同级的操作态） */
+.btn.btn-active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--hover-bg);
+}
+
+.crop-readout {
+  font-size: 13px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.crop-tip {
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}

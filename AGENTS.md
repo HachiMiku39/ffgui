@@ -4,7 +4,7 @@
 
 ## 项目概览
 
-FFGui 是一个基于 Electron 的桌面音视频工具箱（GUI for FFmpeg），个人开源项目（LGPL-3.0-or-later），界面语言为简体中文。已实现四个功能：「音视频转码」「音视频合并」「音视频截取」（无损切 + 抓帧截图）「屏幕录制」。
+FFGui 是一个基于 Electron 的桌面音视频工具箱（GUI for FFmpeg），个人开源项目（LGPL-3.0-or-later），界面语言为简体中文。已实现五个功能：「音视频转码」「音视频合并」「音视频截取」（无损切 + 抓帧截图）「画面裁剪」（单文件可视化画框）「屏幕录制」。
 
 应用通过项目内置的 ffmpeg 执行实际处理：主进程负责探测 ffmpeg 能力（硬件加速 / 编码器 / 封装格式）并缓存、弹文件对话框、spawn ffmpeg 子进程并解析其 `-progress` 输出；渲染进程为纯静态 HTML/CSS/JS 页面。屏幕录制的采集与编码在渲染进程完成（系统选择器 + MediaRecorder），仅结果转 MP4 时走 ffmpeg。
 
@@ -86,6 +86,17 @@ main/ffmpeg.js      主进程核心：
                       -rc vbr -cq、qsv 用 -global_quality、amf 用 -rc qvbr
                       -qvbr_quality_level，数值复用 CRF_MAP，越小质量越高；
                       amf 参数未在真机验证过）
+                    - 可视化裁剪（job.crop）：归一化矩形 {x, y, w, h}，相对视频实际
+                      画面（0~1，与像素无关，预览副本上选的数值同样适用），x/y 为
+                      左上角、w/h 为宽高；边界容差只吸收浮点误差
+                      （CROP_EPS = 1e-6）。由 validateConvertOptions 校验（非法抛中文
+                      错误；与 vcodec: 'copy' 同存直接拒绝），buildCropFilter 生成
+                      crop 滤镜：普通区域按 in_w/in_h 等比例换算、宽高向下取偶兼容
+                      yuv420p；极小合法区域会加固为宽高至少 2，且 x/y 必要时按
+                      out_w/out_h 钳制，避免边缘越界（如 x+w 超出 1 的浮点误差）。
+                      滤镜链顺序固定为 Crop → HDR → Scale：crop 必须位于
+                      链首（基于滤镜实际输入尺寸），HDR→SDR 色调映射（zscale 线性光→
+                      tonemap=hable→bt709）作用于裁剪后的画面，scale 追加在链尾
                     - 合并任务：probeFile 用 ffmpeg -i 的 stderr 探测流信息（时长/
                       有无音视频流/分辨率，attached pic 封面不算视频流）；混合队列用
                       concat filter 重编码拼接，纯音频段生成等长黑屏（color 源）、
@@ -103,11 +114,13 @@ main/ffmpeg.js      主进程核心：
                       流复制 + -avoid_negative_ts make_zero，不重编码；起点落在
                       <= 起点的最近关键帧，可能有偏差（截取页已提示）；输出与源文件
                       同目录同扩展名（复用 buildOutputPath 的 _ffgui 后缀规则）
-                    - 预览副本（runPreview）：截取页中浏览器无法解码的格式（wmv/flv 或
-                      封装非常规编码的 mkv/avi；普通 mkv Chromium 可直接播放）自动转一份
-                      低码率副本（视频 960p/ultrafast/crf30 + aac 96k；纯音频 aac 128k）
-                      到 userData/preview-cache/（单槽位，生成前删旧），副本与原片
-                      时间轴 1:1 对齐，截取与抓帧始终作用于原文件
+                    - 预览副本（runPreview）：截取页与画面裁剪页中浏览器无法解码的格式
+                      （wmv/flv 或封装非常规编码的 mkv/avi；普通 mkv Chromium 可直接播放）
+                      自动转一份低码率副本（视频 960p/ultrafast/crf30 + aac 96k；纯音频
+                      aac 128k）到 userData/preview-cache/（单槽位，生成前删旧），副本
+                      与原片时间轴 1:1 对齐；截取页的截取与抓帧、裁剪页的最终转换始终
+                      作用于原文件（裁剪页只用副本播放与画框，选框按画面比例保存，
+                      后端再按原视频实际分辨率等比例换算）
                     - 抓帧截图（ffgui:captureFrame）：弹保存对话框后
                       ffmpeg -ss <t> -i <原文件> -frames:v 1 输出 PNG（原分辨率）
                     - 录屏采集授权（registerDisplayMediaHandler，注册在 defaultSession）：
@@ -153,6 +166,7 @@ html/index.html     首页（功能导航卡片 + "清除硬件信息缓存"按�
 html/convert.html   转码页
 html/merge.html     合并页（队列拖动排序、混合队列黑屏段拼接、可拖入一个字幕文件）
 html/clip.html      截取页（CSP 额外放行 media-src blob: file: 以播放本地文件）
+html/crop.html      画面裁剪页（CSP 与 clip.html 相同；视频上叠 canvas 画框）
 html/record.html    录屏页（CSP 同 clip.html 另放行 img-src data: 展示来源缩略图；
                     来源选择弹窗、声音勾选、实时预览、计时录制、结果一键转 MP4）
 html/js/index.js    首页视图切换与清缓存逻辑
@@ -174,6 +188,19 @@ html/js/merge.js    合并页全部逻辑：字幕单槽位拖放（拖到拼接
 html/js/clip.js     截取页全部逻辑：原生 <video> 播放（不引第三方播放器库，库不增加
                     解码能力），起止双滑块 + 步进寻址 + 抓帧截图；播放 error 时调
                     makePreview 生成预览副本兜底，失败则判定无法预览、禁止截取
+html/js/crop.js     画面裁剪页全部逻辑：只接受 probeMedia 判定 hasVideo 的单文件；
+                    <video> 暂停后点「绘制裁剪框」，用 Pointer Events 在视频实际
+                    显示帧上拖拽画框（任意方向、边界钳制、框外压暗、过小判无效）；
+                    canvas 按 object-fit: contain 的真实帧矩形定位（黑边不计入坐标），
+                    随 devicePixelRatio 与窗口 resize 重绘，选框按归一化坐标保存故
+                    不漂移；选框为相对画面的 {x, y, w, h}（0~1，x/y >= 0，w/h > 0，
+                    x+w/y+h <= 1），界面只显示 X/Y/宽/高百分比（不做像素估算，
+                    probe 的 coded 尺寸在旋转/SAR 非 1 时会误导）；
+                    播放中禁止画框，切换文件或清除选框即重置并禁用开始；预览副本
+                    只用于播放与画框，转换始终用原文件；提交 window.ffgui.convert
+                    单输入 job（MP4/libx264/aac/yuv420p + quality + crop，保留全部
+                    音轨，无设备预设/HDR/scale/sampleOnly），进度与取消复用
+                    onConvertEvent / cancelConvert
 html/js/record.js   录屏页全部逻辑：desktopCapturer 缩略图弹窗选来源 →
                     prepareDesktopSource 登记 → getDisplayMedia 被授予该来源
                     （系统声音为 'loopback' 回环音轨，仅 Windows）；记住 sourceId，
@@ -256,7 +283,7 @@ tools/nsisbi/       NSISBI（NSIS 解除 2GB 限制分支）免安装 amd64 版�
 - 全部注释与界面文案使用简体中文，提交/文档同样使用中文
 - 主进程/preload 为 CommonJS `require`；渲染进程脚本是无模块的 IIFE（HTML 有 CSP：
   `default-src 'self'; style-src 'self'; script-src 'self'`，禁止内联脚本与远程资源；
-  clip.html 与 record.html 额外放行 `media-src 'self' blob: file:`，
+  clip.html、crop.html 与 record.html 额外放行 `media-src 'self' blob: file:`，
   record.html 另放行 `img-src 'self' data:`（来源缩略图））
 - 渲染进程不得直接访问 Node API，一切跨进程能力走 `window.ffgui`（preload contextBridge）
 - ffmpeg 的日志走 stderr、进度走 stdout（`-progress pipe:1`），主进程按行解析；

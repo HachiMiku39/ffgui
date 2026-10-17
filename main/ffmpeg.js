@@ -354,10 +354,60 @@ function normalizeConvertJob(job) {
   return { ...job, ...preset };
 }
 
+// 可视化裁剪的归一化矩形：{x, y, w, h}，相对于视频实际画面（0~1，与像素无关，
+// 低画质预览副本上选择的数值同样适用）。x/y 为左上角坐标，w/h 为宽高。
+// 边界容差：只吸收浮点误差，避免 0.1+0.2 这类运算误差被误判为越界
+const CROP_EPS = 1e-6;
+
+// 校验并归一化 crop；非法时抛出中文错误。返回 null 表示未裁剪
+function normalizeCrop(crop) {
+  if (crop == null) return null;
+  if (typeof crop !== 'object' || Array.isArray(crop)) throw new Error('裁剪区域格式无效，请重新框选');
+  const value = {};
+  for (const key of ['x', 'y', 'w', 'h']) {
+    const v = crop[key];
+    if (typeof v !== 'number' || !Number.isFinite(v)) {
+      throw new Error(`裁剪区域的${key === 'x' ? 'X' : key === 'y' ? 'Y' : key === 'w' ? '宽度' : '高度'}无效，必须是数值`);
+    }
+    value[key] = v;
+  }
+  if (value.x < 0 || value.y < 0) throw new Error('裁剪区域不能超出画面边界（起点不能为负）');
+  if (value.w <= 0 || value.h <= 0) throw new Error('裁剪区域的宽高必须大于 0');
+  if (value.x + value.w > 1 + CROP_EPS) throw new Error('裁剪区域不能超出画面右边界');
+  if (value.y + value.h > 1 + CROP_EPS) throw new Error('裁剪区域不能超出画面下边界');
+  return value;
+}
+
+// 把归一化裁剪矩形转成 ffmpeg 的 crop 滤镜表达式。
+// 基于滤镜实际输入尺寸（in_w/in_h，可能是 scale 之前的原始分辨率）计算：
+// - 起点 x/y 按比例换算后取整，并钳制在 [0, in_w-out_w] / [0, in_h-out_h] 内，
+//   保证 x+w / y+h 不超出实际帧（尤其是宽高被 max(2,...) 抬到 2 的极小选框）
+// - 宽高按比例换算后向下取偶数（兼容 yuv420p 等子采样格式），再用 max(2,...) 兜底：
+//   极小但合法的选框（如 100x100 视频上 1% 的框）取偶后会是 0，FFmpeg 直接报
+//   non positive size 而失败
+// 注意滤镜选项值里的逗号必须写成 "\,"，否则会被当作滤镜分隔符导致解析失败
+function buildCropFilter(crop) {
+  const c = normalizeCrop(crop);
+  if (!c) return null;
+  // 四个字段已通过 Number.isFinite 校验，String() 只会得到数字字面量，
+  // 不会把未经校验的字符串拼进滤镜表达式
+  const { x, y, w, h } = c;
+  return `crop=w=max(2\\,trunc(in_w*${String(w)}/2)*2)`
+    + `:h=max(2\\,trunc(in_h*${String(h)}/2)*2)`
+    + `:x=max(0\\,min(trunc(in_w*${String(x)})\\,in_w-out_w))`
+    + `:y=max(0\\,min(trunc(in_h*${String(y)})\\,in_h-out_h))`;
+}
+
 function validateConvertOptions(job) {
   const video = !AUDIO_ONLY_FORMATS.has(job.format) && job.vcodec !== 'none';
   const audio = !VIDEO_ONLY_FORMATS.has(job.format) && job.acodec !== 'none';
+  // 裁剪区域先做白名单校验：无论输出是否含视频，非法值一律拒绝；
+  // 纯音频/无视频分支只是忽略 crop，不会把它拼进滤镜链
+  const crop = normalizeCrop(job.crop);
   if (video) {
+    if (job.vcodec === 'copy' && crop) {
+      throw new Error('直接复制视频不能裁剪，请选择编码器');
+    }
     if (job.vcodec === 'copy' && (job.pixFmt || job.h264Profile || job.h264Level || job.fps || job.scale || job.hdr2sdr)) {
       throw new Error('直接复制视频不能改变位深、Profile、Level、帧率、分辨率或动态范围，请选择编码器');
     }
@@ -481,6 +531,7 @@ function buildArgs(job, input, outPath, probe = {}) {
   }
 
   // 视频滤镜链：仅在重编码视频时生效（copy/无视频/纯音频格式下跳过）
+  // - 可视化裁剪（crop）位于链首，基于滤镜实际输入尺寸按归一化比例换算
   // - HDR→SDR 勾选时加入色调映射链（zscale 线性光 → tonemap → bt709），未勾选完全不传
   // - 分辨率缩放（scale）追加在链尾
   const canFilter = !audioOnly && job.vcodec !== 'copy' && job.vcodec !== 'none';
@@ -496,6 +547,10 @@ function buildArgs(job, input, outPath, probe = {}) {
     if (job.maxrate) args.push('-maxrate', `${job.maxrate}k`, '-bufsize', `${job.bufsize}k`);
   }
   const vf = [];
+  // 可视化裁剪：取画面实际尺寸的归一化比例，必须放在滤镜链最前面，
+  // 后续 HDR→SDR / scale 都在裁剪后的画面上进行
+  const cropFilter = canFilter ? buildCropFilter(job.crop) : null;
+  if (cropFilter) vf.push(cropFilter);
   if (canFilter && job.hdr2sdr) {
     vf.push(
       'zscale=transfer=linear:npl=100',
