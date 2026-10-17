@@ -596,10 +596,32 @@ function parseTimeToSeconds(t) {
   return Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]);
 }
 
+// 取消后清理本次任务写出的半成品：任务开始前已存在的文件、空路径一律跳过，
+// 删除失败只记日志，绝不改变取消结果
+function removeCancelledOutput(output, existedBefore) {
+  if (!output || existedBefore) return;
+  try {
+    fs.unlinkSync(output);
+    console.log(`[ffgui] 已删除未完成的输出: ${output}`);
+  } catch (err) {
+    // 文件没生成出来（ENOENT）属正常情况，其余失败只记录
+    if (err && err.code === 'ENOENT') return;
+    console.log(`[ffgui] 删除未完成的输出失败: ${output} (${err && err.message ? err.message : err})`);
+  }
+}
+
+// 取消当前任务：置取消标记并结束子进程，close 回调里再清理半成品输出
+function cancelCurrentTask() {
+  cancelled = true;
+  if (currentChild) currentChild.kill();
+}
+
 // 通用 ffmpeg 任务执行器：spawn、stderr 日志转发、-progress 解析、结束处理
 // taskName 用于控制台日志措辞（转换/合并）
 function runFfmpegTask({ args, index, label, output, getDuration, onStderrText, send, taskName }) {
   return new Promise((resolve) => {
+    // spawn 前记录 output 是否已存在：取消清理只删本次新产生的文件
+    const outputExisted = Boolean(output) && fs.existsSync(output);
     const child = spawn(getFfmpegPath(), args, { stdio: ['ignore', 'pipe', 'pipe'] });
     currentChild = child;
 
@@ -673,6 +695,8 @@ function runFfmpegTask({ args, index, label, output, getDuration, onStderrText, 
       // 冲刷末尾未换行的日志
       if (errLineBuf.trim()) console.log(`[ffmpeg] ${errLineBuf.trim()}`);
       if (cancelled) {
+        // 取消时清掉本次任务已写出的半成品，避免磁盘残留无法播放的残缺文件
+        removeCancelledOutput(output, outputExisted);
         console.log(`[ffgui] 已取消 (${index + 1}): ${label}`);
         send({ type: 'file-error', index, input: label, error: '已取消' });
         return resolve({ ok: false, cancelled: true });
@@ -1329,8 +1353,7 @@ function registerIpc() {
   });
 
   ipcMain.handle('ffgui:cancelConvert', () => {
-    cancelled = true;
-    if (currentChild) currentChild.kill();
+    cancelCurrentTask();
   });
 }
 

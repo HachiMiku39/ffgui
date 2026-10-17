@@ -29,7 +29,7 @@ function load(overrides = {}) {
   };
   vm.createContext(ctx);
   vm.runInContext(source + '\nmodule.exports = {buildArgs, buildClipArgs, buildMergeArgs, buildOutputPath, '
-    + 'pathKey, probeFile, validateAudioSelection, runFfmpegTask, runJob};', ctx);
+    + 'pathKey, probeFile, validateAudioSelection, runFfmpegTask, runJob, cancelCurrentTask};', ctx);
   return ctx.module.exports;
 }
 const api = load();
@@ -266,6 +266,82 @@ test('拒绝覆盖即使返回退出码 0，也不能误报任务完成', async 
   assert.equal((await pending).ok, false);
   assert.equal(events.some((e) => e.type === 'file-done'), false);
   assert.match(events.find((e) => e.type === 'file-error').error, /already exists/);
+});
+
+test('取消任务时删除本次产生的半成品，不误删任务开始前已存在的文件', async () => {
+  const dir = path.join(temp, 'cancel');
+  fs.mkdirSync(dir, { recursive: true });
+  // 子进程 mock：EventEmitter + kill()，与 load({spawn:()=>child}) 的既有用法一致
+  const mockChild = () => {
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.killed = false;
+    child.kill = () => { child.killed = true; };
+    return child;
+  };
+  const start = (mock, output, events = []) => mock.runFfmpegTask({
+    args: [], index: 0, label: dual, output, getDuration: () => 10,
+    send: (e) => events.push(e), taskName: '测试',
+  });
+  // 1. 取消时已写出的半成品被删除，返回值仍是 cancelled
+  const partial = path.join(dir, 'partial.mkv');
+  {
+    const child = mockChild();
+    const mock = load({ spawn: () => child });
+    const events = [];
+    const pending = start(mock, partial, events);
+    fs.writeFileSync(partial, '半成品数据');
+    mock.cancelCurrentTask();
+    assert.equal(child.killed, true, '取消应结束子进程');
+    child.emit('close', 1);
+    const result = await pending;
+    // 结果对象由 vm 上下文创建，逐字段比较而不是 deepEqual
+    assert.equal(result.ok, false);
+    assert.equal(result.cancelled, true);
+    assert.equal(fs.existsSync(partial), false, '取消后必须删除半成品输出');
+    assert.equal(events.some((e) => e.type === 'file-done'), false);
+    assert.match(events.find((e) => e.type === 'file-error').error, /已取消/);
+  }
+  // 2. 任务开始前已存在的同名文件在取消时不能被误删
+  const existing = path.join(dir, 'existing.mkv');
+  fs.writeFileSync(existing, '任务开始前的文件');
+  {
+    const child = mockChild();
+    const mock = load({ spawn: () => child });
+    const pending = start(mock, existing);
+    mock.cancelCurrentTask();
+    child.emit('close', 1);
+    const result = await pending;
+    assert.equal(result.ok, false);
+    assert.equal(result.cancelled, true);
+    assert.equal(fs.readFileSync(existing, 'utf8'), '任务开始前的文件', '不得删除任务启动前已存在的文件');
+  }
+  // 3. 输出文件从未生成（或 output 为空）时取消也不能抛错
+  for (const output of [path.join(dir, 'never-created.mkv'), '']) {
+    const child = mockChild();
+    const mock = load({ spawn: () => child });
+    const pending = start(mock, output);
+    mock.cancelCurrentTask();
+    child.emit('close', 1);
+    const result = await pending;
+    assert.equal(result.ok, false, `output=${JSON.stringify(output)}`);
+    assert.equal(result.cancelled, true, `output=${JSON.stringify(output)}`);
+  }
+  // 4. 正常完成保留输出；一般失败的行为保持不变（仍不清理）
+  for (const [name, code, ended, ok] of [['ok.mkv', 0, true, true], ['fail.mkv', 1, false, false]]) {
+    const file = path.join(dir, name);
+    const child = mockChild();
+    const mock = load({ spawn: () => child });
+    const pending = start(mock, file);
+    fs.writeFileSync(file, name === 'ok.mkv' ? '完整输出' : '失败残留');
+    if (ended) child.stdout.emit('data', Buffer.from('progress=end\n'));
+    else child.stderr.emit('data', Buffer.from('Conversion failed!\n'));
+    child.emit('close', code);
+    const result = await pending;
+    assert.equal(result.ok, ok, `${name} 结果应为 ${ok}`);
+    assert.equal(fs.existsSync(file), true, `${name} 不应被删除`);
+  }
 });
 
 function extractFunction(src, name) {

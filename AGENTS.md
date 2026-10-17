@@ -47,7 +47,10 @@ main/ffmpeg.js      主进程核心：
                       推送 file-start / progress / file-done / file-warning /
                       file-error 事件
                       （spawn/日志/进度解析封装在 runFfmpegTask，转码、合并、截取、
-                      预览、录屏转 MP4 共用）；设备预设（job.devicePreset）在主进程由
+                      预览、录屏转 MP4 共用；取消经 ffgui:cancelConvert →
+                      cancelCurrentTask 置位并 kill 子进程，close 回调里删除本次
+                      新产生的半成品 output，任务启动前已存在的文件不删）；
+                      设备预设（job.devicePreset）在主进程由
                       normalizeConvertJob 按 DEVICE_PRESETS 表二次落实（不能被旧
                       表单值覆盖，须在分配输出扩展名前调用），每个预设锁定
                       格式/编码器/Profile/Level/位深/帧率上限/分辨率/VBV 码率
