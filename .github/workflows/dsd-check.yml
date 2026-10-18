@@ -21,9 +21,6 @@ jobs:
     defaults:
       run:
         shell: bash
-    env:
-      FFMPEG: ffmpeg
-      FFPROBE: ffprobe
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -33,14 +30,25 @@ jobs:
         with:
           node-version: 22
 
-      - name: 安装 FFmpeg 与 ffprobe
+      - name: 下载并校验固定版本 FFmpeg 与 ffprobe
         id: ffmpeg
         run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends -y ffmpeg
+          # Ubuntu 24.04 的 FFmpeg 6.1 不支持上游已使用的 reset_sar / WebP ID3 封面。
+          # 使用 FFmpeg 官网链接的 BtbN 预编译月末版，固定资产与 SHA-256，不现场编译。
+          ffmpeg_archive="$RUNNER_TEMP/ffgui-ffmpeg-linux.tar.xz"
+          ffmpeg_tools="$RUNNER_TEMP/ffgui-ffmpeg"
+          curl --fail --show-error --location --retry 3 \
+            --output "$ffmpeg_archive" \
+            'https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-09-30-13-08/ffmpeg-n9.0.2-17-g2a571b6068-linux64-gpl-9.0.tar.xz'
+          printf '68ee646831adaae2495618346f3bba94ff207ff83bbd34d643e7004730d66269  %s\n' "$ffmpeg_archive" | sha256sum --check --strict
+          mkdir -p "$ffmpeg_tools"
+          tar -xJf "$ffmpeg_archive" -C "$ffmpeg_tools" --strip-components=1
+          test -x "$ffmpeg_tools/bin/ffmpeg"
+          test -x "$ffmpeg_tools/bin/ffprobe"
+          printf 'FFMPEG=%s\nFFPROBE=%s\n' "$ffmpeg_tools/bin/ffmpeg" "$ffmpeg_tools/bin/ffprobe" >> "$GITHUB_ENV"
           node --version > tool-versions.log
-          ffmpeg -version >> tool-versions.log
-          ffprobe -version >> tool-versions.log
+          "$ffmpeg_tools/bin/ffmpeg" -version >> tool-versions.log
+          "$ffmpeg_tools/bin/ffprobe" -version >> tool-versions.log
           cat tool-versions.log
 
       # 所有测试使用 Node 内置运行器；无需为验证下载 Electron 或编译 Rust。

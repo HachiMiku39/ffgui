@@ -80,10 +80,11 @@
 本功能分支使用 GitHub Actions 执行测试、安装依赖、编译 Rust 侧车及打包，不要求本地编译。
 
 - 向 `feat/dsd-pcm-adaptive` 推送后，自动触发「打包产物」，先在其中执行「DSD 与回归验证」；Pull Request 单独触发验证
-- 验证使用 Ubuntu 24.04、Node 22 与真实 FFmpeg / ffprobe，日志作为 Actions artifact 保存 14 天
+- 验证使用 Ubuntu 24.04、Node 22 与 BtbN 固定发布的 FFmpeg / ffprobe 预编译二进制，下载后核对 SHA-256；日志作为 Actions artifact 保存 14 天
 - 打包工作流复用相同验证，当前提交通过后才开始 Windows x64、Windows ARM64、macOS ARM64 三个平台的构建；Windows x64 与 macOS 另用实际随包 FFmpeg 执行 DSD 专项，Windows ARM64 保留交叉构建的机器类型检查；既有 Rust 光盘侧车继续随包提供
 - 在对应 Actions run 的 **Artifacts** 区下载压缩包和 Windows 安装包。功能分支推送与手动构建仅提供测试产物，不自动发布 Release；仅既有的 Release 发布事件会上传到 Release Assets
 - 尚未验证的真实音乐、完整 GUI、DAC 播放与实际设备兼容性见 [交接文档](docs/dsd-pcm.md#验证范围与状态)
+- 仅修改 Markdown 文档的功能分支 push 不重新编译；需要时仍可手动运行工作流
 
 上游常规开发入口保留如下；本次新增功能的验收结果以 GitHub Actions 日志为准：
 

@@ -202,7 +202,7 @@ test('真实FFmpeg：DFF→24-bit WAV保留声道，DSD64手动384kHz→32float 
   }
 });
 
-test('真实FFmpeg：24-bit成品有非静音音频，保留两声道不同的频率', async () => {
+test('真实FFmpeg：24-bit成品有非静音音频，保留两声道不同的频率', async (t) => {
   const input = makeDsf(path.join(temp, 'tones.dsf'), { duration: 0.12, frequency: 1000 });
   const events = [];
   const result = await dsd.runDsdJob(sender(events), { inputs: [input] }, { backend: loadBackend() });
@@ -212,14 +212,37 @@ test('真实FFmpeg：24-bit成品有非静音音频，保留两声道不同的�
     '-f', 'f32le', '-c:a', 'pcm_f32le', '-'], { timeout: 30000 });
   const count = bytes.length / 8;
   assert.ok(count > 6000);
+  const rate = 88200;
   for (let channel = 0; channel < 2; channel++) {
-    let energy = 0, crossings = 0;
+    const targetFrequency = 1000 + channel * 1000;
+    const otherFrequency = 1000 + (1 - channel) * 1000;
+    let energy = 0, crossings = 0, weightSum = 0;
+    let targetReal = 0, targetImaginary = 0, otherReal = 0, otherImaginary = 0;
     for (let i = 0; i < count; i++) {
-      const value = bytes.readFloatLE(i * 8 + channel * 4); energy += value * value;
+      const value = bytes.readFloatLE(i * 8 + channel * 4);
+      const weight = (1 - Math.cos(2 * Math.PI * i / (count - 1))) / 2;
+      const targetPhase = 2 * Math.PI * targetFrequency * i / rate;
+      const otherPhase = 2 * Math.PI * otherFrequency * i / rate;
+      energy += weight * value * value; weightSum += weight;
+      targetReal += weight * value * Math.cos(targetPhase);
+      targetImaginary += weight * value * Math.sin(targetPhase);
+      otherReal += weight * value * Math.cos(otherPhase);
+      otherImaginary += weight * value * Math.sin(otherPhase);
       if (i && bytes.readFloatLE((i - 1) * 8 + channel * 4) <= 0 && value > 0) crossings++;
     }
-    assert.ok(Math.sqrt(energy / count) > 0.05, '不能只生成静音占位文件');
-    assert.ok(Math.abs(crossings / (count / 88200) - (1000 + channel * 1000)) < 30);
+    // 一阶1-bit合成器有量化残留，过零可能在零点附近被重复计数，不能当作音高测量。
+    // 对真实解码结果独立投影至两个已知频率；Hann窗减少有限片段的频谱泄漏。
+    const targetAmplitude = 2 * Math.hypot(targetReal, targetImaginary) / weightSum;
+    const otherAmplitude = 2 * Math.hypot(otherReal, otherImaginary) / weightSum;
+    const targetRms = targetAmplitude / Math.SQRT2;
+    const coherentEnergyFraction = targetRms ** 2 / (energy / weightSum);
+    const crosstalkDb = 20 * Math.log10(Math.max(otherAmplitude, 1e-15) / Math.max(targetAmplitude, 1e-15));
+    const diagnostic = { channel, targetFrequency, zeroCrossingHz: crossings / (count / rate),
+      targetRms, weightedRms: Math.sqrt(energy / weightSum), coherentEnergyFraction, crosstalkDb };
+    t.diagnostic(JSON.stringify(diagnostic));
+    assert.ok(targetRms > 0.05, `必须保留目标频率而非静音或噪声：${JSON.stringify(diagnostic)}`);
+    assert.ok(coherentEnergyFraction > 0.95, `音调频率、采样速率或波形不正确：${JSON.stringify(diagnostic)}`);
+    assert.ok(crosstalkDb < -40, `两声道发生混合或串扰：${JSON.stringify(diagnostic)}`);
   }
 });
 

@@ -144,16 +144,26 @@ DSD 任务持有共享任务占用标记，覆盖探测、峰值扫描及最终�
 
 推送 `feat/dsd-pcm-adaptive` 会运行「打包产物」，先在其中调用「DSD 与回归验证」。Pull Request 独立运行验证；两个工作流均保留手动触发入口。
 
+仅修改 Markdown 文档的功能分支 push 不触发打包，避免交接文档更新造成重复编译。
+
 「打包产物」调用相同验证工作流，并要求本次提交的验证成功后才开始三平台构建。功能分支 push 仅执行一次完整 Ubuntu 回归，独立验证入口用于 PR 或手动检查。Windows x64 与 macOS 在下载自己的 FFmpeg 后另外执行 DSD 专项，以检验实际随包二进制，避免只验证 Ubuntu 的另一版本。
 
 ### 验证环境
 
 - Ubuntu 24.04、Node.js 22。
-- 使用发行版 FFmpeg / ffprobe，版本写入日志。
+- 使用 BtbN 固定发布的 FFmpeg / ffprobe 预编译二进制，下载后核对 SHA-256，版本写入日志；不在工作流现场编译 FFmpeg。
 - Node 内置测试运行器，无需为验证安装 Electron、执行应用打包或编译 Rust。
 - `npm run test:regression`：既有音视频回归。
 - `npm run test:disc`：既有光盘任务、侧车协议和页面回归。
 - `npm run test:dsd`：DSD 转换与页面回归。
+
+固定二进制来自 [FFmpeg 官网下载页](https://ffmpeg.org/download.html) 链接的 [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds)，选用其保留两年的月末版本：
+
+- Release：`autobuild-2026-09-30-13-08`。
+- 资产：`ffmpeg-n9.0.2-17-g2a571b6068-linux64-gpl-9.0.tar.xz`。
+- SHA-256：`68ee646831adaae2495618346f3bba94ff207ff83bbd34d643e7004730d66269`。
+
+Ubuntu 24.04 的默认 FFmpeg 6.1 无法执行上游已使用的 `scale=reset_sar` 及 WebP ID3 附图夹具；采用较新预编译版本覆盖这些既有功能，保留全部回归断言。升级 CI 二进制时应同时更新固定资产、摘要和验证记录。
 
 日志在对应 Actions run 的 Artifacts 区保存 14 天，名称以 `dsd-check-` 开头。测试使用 `FFMPEG` / `FFPROBE` 环境变量选择二进制。只要工具准备成功且任务未取消，各测试组会分别运行，即使某一组失败也尽量保留其他组的诊断结果；任一组失败仍会阻止后续打包。
 
