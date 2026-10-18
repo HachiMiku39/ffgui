@@ -29,6 +29,11 @@ contextBridge.exposeInMainWorld('ffgui', {
     return () => ipcRenderer.removeListener('ffgui:convert-event', listener);
   },
 
+  // DSD 转 PCM（读取真实规格；进度与取消复用现有转换通道）
+  dsdPickFiles: () => ipcRenderer.invoke('ffgui:dsd-pick-files'),
+  dsdProbe: (files) => ipcRenderer.invoke('ffgui:dsd-probe', files),
+  dsdConvert: (job) => ipcRenderer.invoke('ffgui:dsd-convert', job),
+
   // 合并任务（探测 + 拼接；进度事件复用 onConvertEvent，取消复用 cancelConvert）
   probeMedia: (files) => ipcRenderer.invoke('ffgui:probeMedia', files),
   merge: (job) => ipcRenderer.invoke('ffgui:merge', job),

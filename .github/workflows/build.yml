@@ -1,6 +1,9 @@
 name: 打包产物
 
 on:
+  # 功能分支推送后自动在 GitHub 云端验证并打包，不发布正式版本。
+  push:
+    branches: [feat/dsd-pcm-adaptive]
   # 手动触发（Actions 页面 → 打包产物 → Run workflow）
   workflow_dispatch:
   # 发布 Release 时触发
@@ -11,9 +14,20 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  checks:
+    uses: ./.github/workflows/dsd-check.yml
+    permissions:
+      contents: read
+
   windows:
+    needs: checks
     runs-on: windows-latest
+    timeout-minutes: 60
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -22,9 +36,16 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
 
       - name: 安装 Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: 缓存 Rust 构建
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native/ffgui-disc
+          key: windows-x64
 
       - name: 构建光盘侧车
         shell: pwsh
@@ -53,6 +74,14 @@ jobs:
           Copy-Item $exe.FullName bin/ffmpeg.exe
           # PowerShell 执行相对路径程序必须带 .\
           .\bin\ffmpeg.exe -version | Select-Object -First 1
+          # ffprobe 仅供云端验证，引用展开包中的文件，不加入应用安装包。
+          $probe = Join-Path $exe.DirectoryName 'ffprobe.exe'
+          if (-not (Test-Path $probe)) { throw '压缩包中未找到 ffprobe.exe，无法验证 DSD 输出' }
+          "FFMPEG=$((Resolve-Path 'bin/ffmpeg.exe').Path)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "FFPROBE=$probe" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: 验证随包 FFmpeg 的 DSD 转换
+        run: node --test scripts/dsd.test.cjs
 
       - name: 安装依赖
         run: npm ci
@@ -88,7 +117,9 @@ jobs:
             out/make/**/FFGui-*-Setup.exe
 
   windows-arm64:
+    needs: checks
     runs-on: windows-latest
+    timeout-minutes: 60
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -97,11 +128,18 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
 
       - name: 安装 Rust（含 ARM64 target）
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-pc-windows-msvc
+
+      - name: 缓存 Rust 构建
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native/ffgui-disc
+          key: windows-arm64
 
       - name: 配置 MSVC ARM64 环境
         uses: ilammy/msvc-dev-cmd@v1
@@ -210,7 +248,9 @@ jobs:
             out/make/**/FFGui-*-Setup.exe
 
   macos:
+    needs: checks
     runs-on: macos-latest
+    timeout-minutes: 60
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -219,9 +259,16 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
 
       - name: 安装 Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: 缓存 Rust 构建
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native/ffgui-disc
+          key: macos-arm64
 
       - name: 构建光盘侧车
         run: |
@@ -255,6 +302,14 @@ jobs:
           cp -R ffmac/bin ffmac/lib bin/
           chmod +x bin/bin/ffmpeg
           ./bin/bin/ffmpeg -version | head -1
+
+      - name: 验证随包 FFmpeg 的 DSD 转换
+        env:
+          FFMPEG: ${{ github.workspace }}/bin/bin/ffmpeg
+          FFPROBE: ${{ github.workspace }}/bin/bin/ffprobe
+        run: |
+          chmod +x bin/bin/ffprobe
+          node --test scripts/dsd.test.cjs
 
       - name: 安装依赖
         run: npm ci

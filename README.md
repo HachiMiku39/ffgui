@@ -17,6 +17,18 @@
 - HDR 转 SDR：基于 zscale + tonemap 的色调映射
 - 纯音频提取：输出 MP3 / FLAC / WAV 等时自动去掉视频流
 
+### DSD 转 PCM（基于 v0.6.0 新增）
+
+- 独立页面批量导入 DSF / DFF，读取真实文件头识别 DSD 倍率、采样率家族与声道；SACD ISO 需先提取为 DSF / DFF
+- 默认输出 24-bit FLAC，可选 24-bit WAV 或 32-bit 浮点 WAV
+- 常见 44.1 kHz 家族：DSD64 → 88.2 kHz，DSD128 / 256 / 512 → 176.4 kHz；48 kHz 家族对应 96 / 192 kHz
+- 这是本项目的默认选率策略，不代表 DSD 与 PCM 存在统一音质等价关系；96 / 192 kHz 的非整数比例转换也不必然劣化
+- 保留源声道、可支持的文字标签和 FLAC 内嵌封面；WAV 不写内嵌封面
+- 默认不额外增加 6 dB；转换前扫描峰值，24-bit 输出会削波时拒绝该文件并提示降低增益，浮点 WAV 超幅时保留数据并提示
+- 支持批量进度、取消与输出文件避让；原始 DSF / DFF 不改写
+
+完整规则、格式限制与交接说明见 [DSD 转 PCM 功能说明](docs/dsd-pcm.md)。本功能分支仍使用版本号 `0.6.0`，正式版本号由上游维护者决定。
+
 ### 音视频合并
 
 - 拖入视频或音频，按住手柄上下拖动调整拼接顺序
@@ -59,9 +71,21 @@
 
 ### 回归测试
 
-`npm test` 使用 Node 内置测试运行器，无需安装额外测试框架。运行前将 ffmpeg 和 ffprobe 加入 PATH，也可以用 `FFMPEG`、`FFPROBE` 环境变量指定路径。测试用 FFmpeg 需要包含 libx264、AAC、libmp3lame、FLAC 和 subtitles 滤镜。
+`npm test` 使用 Node 内置测试运行器，覆盖音视频回归、光盘任务与侧车协议、光盘页面、DSD 转换与 DSD 页面，无需额外测试框架。也可分别使用 `npm run test:regression`、`npm run test:disc`、`npm run test:dsd`。测试环境需要 ffmpeg 和 ffprobe，也可以用 `FFMPEG`、`FFPROBE` 指定路径；FFmpeg 需要包含 libx264、AAC、libmp3lame、FLAC、DSD 解码和 subtitles 滤镜。
 
-测试会生成临时媒体并在结束后清理，覆盖多音轨转码/截取/合并、选轨、字幕附件、输出防覆盖、进度拆包和毫秒时间。完整应用手工验证仍使用 `npm start`。
+测试生成独立临时媒体并在结束后清理。DSD 专项使用合成的短 DSF / DFF，通过真实 FFmpeg 转换并用 ffprobe 核对输出；页面专项是 Node 中的页面逻辑回归，不代表完整 Electron 应用已经人工操作验证。
+
+### GitHub 云端验证与打包
+
+本功能分支使用 GitHub Actions 执行测试、安装依赖、编译 Rust 侧车及打包，不要求本地编译。
+
+- 向 `feat/dsd-pcm-adaptive` 推送后，自动触发「打包产物」，先在其中执行「DSD 与回归验证」；Pull Request 单独触发验证
+- 验证使用 Ubuntu 24.04、Node 22 与真实 FFmpeg / ffprobe，日志作为 Actions artifact 保存 14 天
+- 打包工作流复用相同验证，当前提交通过后才开始 Windows x64、Windows ARM64、macOS ARM64 三个平台的构建；Windows x64 与 macOS 另用实际随包 FFmpeg 执行 DSD 专项，Windows ARM64 保留交叉构建的机器类型检查；既有 Rust 光盘侧车继续随包提供
+- 在对应 Actions run 的 **Artifacts** 区下载压缩包和 Windows 安装包。功能分支推送与手动构建仅提供测试产物，不自动发布 Release；仅既有的 Release 发布事件会上传到 Release Assets
+- 尚未验证的真实音乐、完整 GUI、DAC 播放与实际设备兼容性见 [交接文档](docs/dsd-pcm.md#验证范围与状态)
+
+上游常规开发入口保留如下；本次新增功能的验收结果以 GitHub Actions 日志为准：
 
 ```bash
 npm install

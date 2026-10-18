@@ -1,0 +1,70 @@
+name: DSD 与回归验证
+
+on:
+  pull_request:
+  workflow_dispatch:
+  # 打包工作流复用相同检查，确保当前提交先通过验证再生成安装包。
+  workflow_call:
+
+permissions:
+  contents: read
+
+# 与调用方的 build-* 组区分，避免可复用工作流取消正在等待它的打包任务。
+concurrency:
+  group: dsd-check-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    env:
+      FFMPEG: ffmpeg
+      FFPROBE: ffprobe
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 安装 FFmpeg 与 ffprobe
+        id: ffmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y ffmpeg
+          node --version > tool-versions.log
+          ffmpeg -version >> tool-versions.log
+          ffprobe -version >> tool-versions.log
+          cat tool-versions.log
+
+      # 所有测试使用 Node 内置运行器；无需为验证下载 Electron 或编译 Rust。
+      - name: 音视频功能回归（真实 FFmpeg）
+        if: ${{ !cancelled() && steps.ffmpeg.outcome == 'success' }}
+        run: npm run test:regression 2>&1 | tee regression.log
+
+      - name: 光盘任务、侧车协议与页面回归
+        if: ${{ !cancelled() && steps.ffmpeg.outcome == 'success' }}
+        run: npm run test:disc 2>&1 | tee disc.log
+
+      - name: DSD 文件头、转换与页面回归（真实 FFmpeg）
+        if: ${{ !cancelled() && steps.ffmpeg.outcome == 'success' }}
+        run: npm run test:dsd 2>&1 | tee dsd.log
+
+      - name: 保存验证日志
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsd-check-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            tool-versions.log
+            regression.log
+            disc.log
+            dsd.log
+          if-no-files-found: warn
+          retention-days: 14

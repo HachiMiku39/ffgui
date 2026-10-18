@@ -232,6 +232,28 @@ const HW_QUALITY_PATTERN = /_(nvenc|qsv|amf)$/;
 
 let currentChild = null;
 let cancelled = false;
+// DSD 的探测、峰值扫描与写盘属于同一批任务；阶段之间也持有租约，
+// 防止另一页面重置取消标记或接管 currentChild。租约只供主进程内部使用。
+let taskLease = null;
+
+function assertTaskAvailable() {
+  if (taskLease || currentChild) throw new Error('已有转换任务正在运行，请等待完成或先取消');
+}
+
+function acquireTaskLease() {
+  assertTaskAvailable();
+  taskLease = {};
+  cancelled = false;
+  return taskLease;
+}
+
+function releaseTaskLease(lease) {
+  if (taskLease === lease) taskLease = null;
+}
+
+function isTaskCancelled(lease) {
+  return taskLease !== lease || cancelled;
+}
 
 function pathKey(file) {
   const resolved = path.resolve(file);
@@ -620,7 +642,12 @@ function cancelCurrentTask() {
 
 // 通用 ffmpeg 任务执行器：spawn、stderr 日志转发、-progress 解析、结束处理
 // taskName 用于控制台日志措辞（转换/合并）
-function runFfmpegTask({ args, index, label, output, getDuration, onStderrText, send, taskName }) {
+function runFfmpegTask({ args, index, label, output, getDuration, onStderrText, send, taskName, lease }) {
+  if (currentChild || (taskLease && taskLease !== lease)) {
+    send({ type: 'file-error', index, input: label, error: '已有转换任务正在运行，请等待完成或先取消' });
+    return Promise.resolve({ ok: false });
+  }
+  if (lease && isTaskCancelled(lease)) return Promise.resolve({ ok: false, cancelled: true });
   return new Promise((resolve) => {
     // spawn 前记录 output 是否已存在：取消清理只删本次新产生的文件
     const outputExisted = Boolean(output) && fs.existsSync(output);
@@ -632,6 +659,7 @@ function runFfmpegTask({ args, index, label, output, getDuration, onStderrText, 
     let outBuffer = '';
     let kv = {};
     let progressEnded = false;
+    let settled = false;
 
     send({ type: 'file-start', index, input: label, output });
     console.log(`[ffgui] 开始${taskName} (${index + 1}): ${label}`);
@@ -687,13 +715,17 @@ function runFfmpegTask({ args, index, label, output, getDuration, onStderrText, 
     });
 
     child.on('error', (err) => {
-      currentChild = null;
+      if (settled) return;
+      settled = true;
+      if (currentChild === child) currentChild = null;
       send({ type: 'file-error', index, input: label, error: String(err) });
       resolve({ ok: false });
     });
 
     child.on('close', (code) => {
-      currentChild = null;
+      if (settled) return;
+      settled = true;
+      if (currentChild === child) currentChild = null;
       // 冲刷末尾未换行的日志
       if (errLineBuf.trim()) console.log(`[ffmpeg] ${errLineBuf.trim()}`);
       if (cancelled) {
@@ -750,11 +782,13 @@ async function convertOne(job, input, index, send, outPath) {
 
 // 主进程内部单文件转换入口：光盘等任务可直接复用，不新增渲染层 IPC。
 async function runSingleFileConversion({ job, input, output, send = () => {} }) {
+  assertTaskAvailable();
   cancelled = false;
   return convertOne(job, input, 0, send, output);
 }
 
 async function runJob(sender, job) {
+  assertTaskAvailable();
   job = normalizeConvertJob(job);
   cancelled = false;
   const reserved = new Set(job.inputs.map(pathKey));
@@ -955,6 +989,7 @@ function buildMergeArgs(job, probes, useX264) {
 }
 
 async function runMerge(sender, job) {
+  assertTaskAvailable();
   cancelled = false;
   const send = (evt) => {
     if (!sender.isDestroyed()) sender.send('ffgui:convert-event', evt);
@@ -1027,6 +1062,7 @@ function buildClipArgs(job, outPath) {
 }
 
 async function runClip(sender, job) {
+  assertTaskAvailable();
   cancelled = false;
   const send = (evt) => {
     if (!sender.isDestroyed()) sender.send('ffgui:convert-event', evt);
@@ -1060,6 +1096,7 @@ function getPreviewDir() {
 }
 
 async function runPreview(sender, job) {
+  assertTaskAvailable();
   cancelled = false;
   const send = (evt) => {
     if (!sender.isDestroyed()) sender.send('ffgui:convert-event', evt);
@@ -1136,6 +1173,7 @@ const recordStreams = new Map();
 
 // 录制结果转 MP4：视频流无损复制（VP9 封装进 MP4），Opus 重封装为 AAC（MP4 不支持 Opus）
 async function runRecordRemux(sender, input) {
+  assertTaskAvailable();
   cancelled = false;
   const send = (evt) => {
     if (!sender.isDestroyed()) sender.send('ffgui:convert-event', evt);
@@ -1365,4 +1403,9 @@ function registerIpc() {
   });
 }
 
-module.exports = { registerIpc, getCapabilities, runSingleFileConversion, cancelCurrentTask };
+module.exports = {
+  registerIpc, getCapabilities, runSingleFileConversion, cancelCurrentTask,
+  // 主进程内部复用；不通过 preload 暴露原始 FFmpeg 参数或租约。
+  runFfmpegTask, probeFile, buildOutputPath, pathKey,
+  acquireTaskLease, releaseTaskLease, isTaskCancelled,
+};

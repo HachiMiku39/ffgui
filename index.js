@@ -37,6 +37,8 @@ function createWindow() {
 app.whenReady().then(() => {
   // 注册 ffmpeg 能力探测 / 文件选择 / 转换任务等 IPC
   require('./main/ffmpeg').registerIpc();
+  // DSD 转 PCM：真实规格探测、自适应采样率与批量转换
+  require('./main/dsd').registerDsdIpc();
   // 光盘抓取：Rust 侧车 + 内部 FFmpeg 转码编排
   require('./main/disc').registerDiscIpc();
   // 主题：先应用持久化设置（nativeTheme.themeSource），再注册切换 IPC

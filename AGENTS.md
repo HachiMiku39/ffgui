@@ -4,7 +4,7 @@
 
 ## 项目概览
 
-FFGui 是一个基于 Electron 的桌面音视频工具箱（GUI for FFmpeg），个人开源项目（LGPL-3.0-or-later），界面语言为简体中文。已实现六个功能：「音视频转码」「音视频合并」「音视频截取」（无损切 + 抓帧截图）「画面裁剪」（单文件可视化画框）「屏幕录制」「光盘抓取」。
+FFGui 是一个基于 Electron 的桌面音视频工具箱（GUI for FFmpeg），个人开源项目（LGPL-3.0-or-later），界面语言为简体中文。已实现七个功能：「音视频转码」「音视频合并」「音视频截取」（无损切 + 抓帧截图）「画面裁剪」（单文件可视化画框）「屏幕录制」「光盘抓取」「DSD 转 PCM」。
 
 应用通过项目内置的 ffmpeg 执行实际处理：主进程负责探测 ffmpeg 能力（硬件加速 / 编码器 / 封装格式）并缓存、弹文件对话框、spawn ffmpeg 子进程并解析其 `-progress` 输出；渲染进程为纯静态 HTML/CSS/JS 页面。屏幕录制的采集与编码在渲染进程完成（系统选择器 + MediaRecorder），仅结果转 MP4 时走 ffmpeg。
 
@@ -376,3 +376,15 @@ Rust 侧车用 `cd native/ffgui-disc && cargo test --locked`。手工验证方�
 - 进度字段跨 stdout 数据块保留，progress 事件携带 input；成功任务还必须收到 progress=end（部分 FFmpeg 构建拒绝覆盖也返回退出码 0）。
 - 字幕路径分两层转义：先滤镜选项值，再滤镜图；调用方不再额外加单引号。
 - 截取输入框保留毫秒，三个时间滑块步长为 0.001 秒。
+
+
+## DSD 转 PCM（基于 v0.6.0 的新增功能）
+
+- `main/dsd.js`：有界读取 DSF/DFF 原始文件头，识别真实 DSD 位采样率和声道。44.1 kHz 家族默认 DSD64 → 88.2 kHz，DSD128/256/512 → 176.4 kHz；48 kHz 家族对应 96/192 kHz。这是播放副本的产品预设，不是音质等价标准。应用仍无需额外携带 ffprobe。
+- `registerDsdIpc()` 在入口注册 `ffgui:dsd-pick-files`、`ffgui:dsd-probe`、`ffgui:dsd-convert`；preload 只暴露 `dsdPickFiles`、`dsdProbe`、`dsdConvert`。进度复用 `ffgui:convert-event`，取消复用 `cancelConvert()`。
+- `html/dsd.html` / `html/js/dsd.js` / `html/css/dsd.css`：独立批量转换页，沿用主题与 CSP；前端显示逐文件预期规格，后端在实际转换时重新解析并落实规则。格式默认 FLAC、24-bit 整数；WAV 允许 24-bit 整数或 32-bit float，FLAC 禁止浮点选项。
+- 转换先沿同一浮点低通/重采样/增益路径扫描峰值，再导出。事件的 `phase` 为 `scan` 或 `convert`，`percent` 是阶段内进度，页面将两阶段分别折算为总体的 50%；最终文件发布成功后才发 `file-done`。
+- 增益范围 -12～+6 dB，默认 0 dB；整数超幅明确拒绝并提示降低增益，不做逐曲自动归一化。32-bit float 可以保留超满幅采样并提示。低通策略和参数见 `docs/dsd-pcm.md`；手动选择更高输出采样率不会自动扩大低通带宽。
+- 保留声道布局与可支持的标签/封面；WAV 不写封面。输出先写目标目录内的独立临时目录，再无覆盖发布；取消或失败只清理本次临时文件，保留源文件、既有文件和同批其他成功输出。DSD 处理期间通过主进程内部任务租约避免其他 FFmpeg 任务抢占。
+- `scripts/dsd.test.cjs` 覆盖真实合成 DSD 转换、参数与文件处理，`scripts/dsd-ui.test.cjs` 覆盖界面状态机。新增 `npm run test:dsd`，完整 `npm test` 同时保留原有转码和光盘回归。
+- 云端验证由 `.github/workflows/dsd-check.yml` 执行；`build.yml` 三个平台必须先通过验证再打包。开发阶段只向 GitHub Actions 上传产物，原有 Release 事件发布逻辑保留。验证结果和未覆盖的真实专辑、DST、DAC、人工 GUI 场景要分别记录，不能把合成样本通过表述为全场景验证。

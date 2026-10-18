@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; style-src 'self'; script-src 'self'" />
+  <title>DSD 转 PCM - FFGui</title>
+  <link rel="icon" href="../assets/imgs/icon.ico" type="image/x-icon" />
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="css/dsd.css" />
+</head>
+<body>
+  <main class="view dsd-view">
+    <header class="feature-header">
+      <button id="btn-back" class="btn-back" type="button">← 返回首页</button>
+      <h2>DSD 转 PCM</h2>
+    </header>
+
+    <section id="file-panel" class="panel" aria-label="DSD 文件队列">
+      <div class="panel-header">
+        <h3>DSD 文件 <span id="file-count" class="dsd-count"></span></h3>
+        <div class="panel-actions">
+          <button id="btn-add-files" class="btn" type="button">添加 DSF / DFF…</button>
+          <button id="btn-clear-files" class="btn btn-plain" type="button" disabled>清空队列</button>
+        </div>
+      </div>
+      <ul id="file-list" class="dsd-file-list"></ul>
+      <p id="queue-hint" class="caps-info" aria-live="polite">支持批量选择或拖入 DSF / DFF 文件。</p>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header"><h3>输出设置</h3></div>
+      <div class="form-grid">
+        <label class="form-item">
+          <span class="form-label">输出格式</span>
+          <select id="sel-format">
+            <option value="flac" selected>FLAC（压缩保存 PCM）</option>
+            <option value="wav">WAV（PCM）</option>
+          </select>
+        </label>
+        <label class="form-item">
+          <span class="form-label">采样率</span>
+          <select id="sel-sample-rate" aria-describedby="rate-hint">
+            <option value="auto" selected>自动 · 根据 DSD 规格选择</option>
+            <option value="88200">88.2 kHz</option>
+            <option value="176400">176.4 kHz</option>
+            <option value="352800">352.8 kHz</option>
+            <option value="96000">96 kHz</option>
+            <option value="192000">192 kHz</option>
+            <option value="384000">384 kHz</option>
+          </select>
+        </label>
+        <label class="form-item form-item-dir">
+          <span class="form-label">输出目录</span>
+          <span class="dir-picker">
+            <input id="input-outdir" type="text" readonly placeholder="默认与各源文件相同目录" />
+            <button id="btn-pick-dir" class="btn" type="button">浏览…</button>
+            <button id="btn-reset-dir" class="btn btn-plain hidden" type="button">恢复默认</button>
+          </span>
+        </label>
+      </div>
+      <p id="rate-hint" class="caps-info">自动策略：DSD64 → 88.2 kHz；DSD128 / 256 / 512 → 176.4 kHz。较少见的 48 kHz 家族相应输出 96 / 192 kHz。这是默认输出策略，不代表 DSD 与 PCM 的音质等价。</p>
+
+      <details class="dsd-advanced">
+        <summary>高级设置</summary>
+        <div class="form-grid">
+          <label class="form-item">
+            <span class="form-label">位深</span>
+            <select id="sel-bit-depth" aria-describedby="format-hint">
+              <option value="24" selected>24-bit 整数（播放 / 收藏）</option>
+              <option id="option-float" value="32f" disabled>32-bit 浮点（WAV 编辑中间文件）</option>
+            </select>
+          </label>
+          <label class="form-item">
+            <span class="form-label">增益（dB）</span>
+            <input id="input-gain" type="number" min="-12" max="6" step="0.1" value="0" required aria-describedby="gain-hint" />
+          </label>
+          <label class="dsd-checkbox">
+            <input id="copy-metadata" type="checkbox" checked />
+            <span>保留文字标签</span>
+          </label>
+          <label class="dsd-checkbox">
+            <input id="copy-cover" type="checkbox" checked />
+            <span>保留内嵌封面（FLAC）</span>
+          </label>
+        </div>
+        <p id="format-hint" class="caps-info">FLAC 输出使用 24-bit 整数；32-bit 浮点仅适用于 WAV。</p>
+        <p id="gain-hint" class="caps-info">默认 0 dB，不自动增加 6 dB 或逐曲归一化。转换前检查处理后的峰值；24-bit 输出超出满幅时会提示降低增益。</p>
+        <p class="caps-info">输出采样率升至 352.8 / 384 kHz 时仍使用约 30 kHz 的低通，适用于后续处理，不会增加保留的高频范围。</p>
+      </details>
+      <p class="caps-info">保留源声道布局。输出文件自动避开同名文件，原始 DSF / DFF 保留。</p>
+    </section>
+
+    <section class="panel">
+      <div class="convert-actions">
+        <button id="btn-start" class="btn btn-primary" type="button" disabled>开始转换</button>
+        <button id="btn-cancel" class="btn btn-danger hidden" type="button">取消</button>
+        <span id="status-text" class="status-text" role="status" aria-live="polite">请添加 DSD 文件</span>
+      </div>
+      <div id="progress-track" class="progress-track" role="progressbar" aria-label="批量转换进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <div id="progress-bar" class="progress-bar"></div>
+      </div>
+      <pre id="log-area" class="log-area hidden" aria-label="转换日志"></pre>
+    </section>
+  </main>
+  <script src="js/theme.js"></script>
+  <script src="js/dsd.js"></script>
+</body>
+</html>

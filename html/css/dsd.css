@@ -1,0 +1,56 @@
+/* ---------- DSD 转 PCM 页 ---------- */
+.dsd-view { max-width: 960px; }
+.dsd-count { font-size: 12px; font-weight: 400; color: var(--text-secondary); }
+.dsd-file-list { list-style: none; max-height: 330px; overflow-y: auto; }
+.dsd-file-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 4px;
+  border-bottom: 1px solid var(--border);
+}
+.dsd-file-item:last-child { border-bottom: none; }
+.dsd-file-details { flex: 1; min-width: 0; }
+.dsd-file-name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+}
+.dsd-file-source, .dsd-file-target, .dsd-file-output, .dsd-file-warning {
+  margin-top: 5px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.dsd-file-target { color: var(--accent); }
+.dsd-file-warning { color: var(--danger); }
+.dsd-file-item .file-status { min-width: 72px; text-align: right; padding-top: 2px; }
+.dsd-file-item .file-remove { margin-top: 1px; }
+.dsd-file-item .file-remove:disabled { opacity: 0.4; cursor: not-allowed; }
+.dsd-advanced { margin-top: 18px; border-top: 1px solid var(--border); padding-top: 14px; }
+.dsd-advanced summary { font-size: 13px; color: var(--text-secondary); cursor: pointer; }
+.dsd-advanced[open] summary { margin-bottom: 16px; }
+.dsd-advanced input[type="number"] {
+  padding: 8px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--text);
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.dsd-advanced input[type="number"]:focus { outline: 1px solid var(--accent); }
+.dsd-checkbox { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.dsd-checkbox input { accent-color: var(--accent); }
+.dsd-view .form-item-dir { grid-column: 1 / -1; }
+.dsd-view .status-text { white-space: normal; overflow-wrap: anywhere; }
+.dsd-view .caps-info { line-height: 1.7; }
+.dsd-view #file-panel.drag-over { border-color: var(--accent); background: var(--hover-bg); }
+.dsd-view button:focus-visible, .dsd-view summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}

@@ -2,6 +2,7 @@
 (function () {
   const FEATURE_NAMES = {
     convert: '音视频转码',
+    dsd: 'DSD 转 PCM',
     merge: '音视频合并',
     clip: '音视频截取',
     crop: '画面裁剪',
@@ -23,6 +24,10 @@
     }
     if (feature === 'merge') {
       window.location.href = 'merge.html';
+      return;
+    }
+    if (feature === 'dsd') {
+      window.location.href = 'dsd.html';
       return;
     }
     if (feature === 'clip') {
