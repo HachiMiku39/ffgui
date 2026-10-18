@@ -122,6 +122,23 @@ jobs:
           }
           clang --version
 
+      - name: 指定 MSVC ARM64 链接器
+        shell: pwsh
+        run: |
+          # Git for Windows 自带 /usr/bin/link.exe，会遮蔽 MSVC 链接器；
+          # 交叉链接必须显式指向 Hostx64\arm64\link.exe
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -products * -property installationPath
+          if (-not $vs) { throw '未找到 Visual Studio' }
+          $toolset = Get-ChildItem (Join-Path $vs 'VC\Tools\MSVC') -Directory |
+            Sort-Object Name -Descending | Select-Object -First 1
+          if (-not $toolset) { throw '未找到 MSVC 工具集' }
+          $linker = Join-Path $toolset.FullName 'bin\Hostx64\arm64\link.exe'
+          if (-not (Test-Path $linker)) { throw "未找到 ARM64 链接器：$linker" }
+          "CARGO_TARGET_AARCH64_PC_WINDOWS_MSVC_LINKER=$linker" |
+            Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "ARM64 linker: $linker"
+
       - name: 构建 ARM64 光盘侧车
         shell: pwsh
         run: |
