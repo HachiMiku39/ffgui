@@ -95,8 +95,8 @@ module.exports = {
       process.platform === 'linux'
         ? []
         : process.platform === 'darwin'
-          ? ['./bin/']
-          : ['./bin/ffmpeg.exe'],
+          ? ['./bin/', './bin/disc/']
+          : ['./bin/ffmpeg.exe', './bin/disc/'],
     ignore: [
       /^\/out($|\/)/,
       /^\/test_media($|\/)/,
@@ -113,6 +113,9 @@ module.exports = {
       /^\/\.gitignore$/,
       /^\/\.npmrc$/,
       /^\/forge\.config\.js$/,
+      // Rust 光盘侧车源码与构建产物由 extraResource 提供二进制，不进 asar
+      /^\/native($|\/)/,
+      /^\/bin\/disc($|\/)/,
     ],
   },
   rebuildConfig: {},

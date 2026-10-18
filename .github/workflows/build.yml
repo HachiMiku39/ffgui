@@ -23,6 +23,16 @@ jobs:
         with:
           node-version: 22
 
+      - name: 安装 Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 构建光盘侧车
+        shell: pwsh
+        run: |
+          cargo build --locked --release --manifest-path native/ffgui-disc/Cargo.toml
+          New-Item -ItemType Directory -Force bin/disc | Out-Null
+          Copy-Item native/ffgui-disc/target/release/ffgui-disc.exe bin/disc/ffgui-disc.exe
+
       - name: 下载 ffmpeg 并放入 bin/
         shell: pwsh
         run: |
@@ -87,6 +97,42 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+
+      - name: 安装 Rust（含 ARM64 target）
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-pc-windows-msvc
+
+      - name: 配置 MSVC ARM64 环境
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: arm64
+
+      - name: 准备 clang（ring ARM64 汇编）
+        shell: pwsh
+        run: |
+          if (-not (Get-Command clang -ErrorAction SilentlyContinue)) {
+            $llvmBin = 'C:\Program Files\LLVM\bin'
+            if (-not (Test-Path "$llvmBin\clang.exe")) {
+              choco install llvm -y --no-progress
+            }
+            if (-not (Test-Path "$llvmBin\clang.exe")) { throw '未找到 clang，无法构建 ring ARM64' }
+            $llvmBin | Out-File -FilePath $env:GITHUB_PATH -Append
+            $env:PATH = "$llvmBin;$env:PATH"
+          }
+          clang --version
+
+      - name: 构建 ARM64 光盘侧车
+        shell: pwsh
+        run: |
+          cargo build --locked --release --manifest-path native/ffgui-disc/Cargo.toml --target aarch64-pc-windows-msvc
+          New-Item -ItemType Directory -Force bin/disc | Out-Null
+          Copy-Item native/ffgui-disc/target/aarch64-pc-windows-msvc/release/ffgui-disc.exe bin/disc/ffgui-disc.exe
+          $bytes = [System.IO.File]::ReadAllBytes("$PWD\bin\disc\ffgui-disc.exe")
+          $peOffset = [BitConverter]::ToInt32($bytes, 0x3C)
+          $machine = [BitConverter]::ToUInt16($bytes, $peOffset + 4)
+          if ($machine -ne 0xAA64) { throw ('bin/disc/ffgui-disc.exe 不是 ARM64 二进制 (machine=0x{0:X4})' -f $machine) }
+          Write-Host 'ffgui-disc.exe 机器类型校验通过：ARM64'
 
       - name: 下载 ARM64 版 ffmpeg 并放入 bin/
         shell: pwsh
@@ -156,6 +202,17 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+
+      - name: 安装 Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 构建光盘侧车
+        run: |
+          set -e
+          cargo build --locked --release --manifest-path native/ffgui-disc/Cargo.toml
+          mkdir -p bin/disc
+          cp native/ffgui-disc/target/release/ffgui-disc bin/disc/ffgui-disc
+          chmod +x bin/disc/ffgui-disc
 
       - name: 下载预编译 ffmpeg 并放入 bin/
         run: |

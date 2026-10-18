@@ -35,6 +35,16 @@
 - 可调输出质量（高 / 标准 / 低）与输出目录，支持进度显示与取消；
   导出宽高会向下取偶数（如 1919→1918），已有文件自动避让不覆盖
 
+### 光盘抓取
+
+- 支持 DVD / Blu-ray 的 ISO 镜像、已提取目录（VIDEO_TS / BDMV）和物理光驱
+- 探测标题、时长、章节、音轨和字幕语言；默认选最长标题，可多选标题逐条抓取
+- 音轨/字幕三态选择：全部保留、一条不保留、或逐项指定，避免静默丢轨
+- 无损 MKV：直接复制视频流；转码 MKV / MP4：H.264 + 可选 AAC，
+  质量高/标准/低，保留章节；MP4 不支持 PGS / VobSub 图像字幕，需主动选择不保留
+- 加密蓝光需自备本地 KEYDB.cfg；在线密钥服务不启用
+- 物理光驱与加密盘的兼容性仍需真机验证
+
 ## 运行与开发
 
 ### 音轨与输出文件
@@ -71,6 +81,7 @@ npm run make       # 生成安装包（Windows: NSIS / macOS: zip / Linux: deb�
 
 - Electron 41，无前端框架、无打包器：渲染层为原生 HTML / CSS / JS
 - 主进程负责 ffmpeg 能力探测与缓存、文件对话框、spawn ffmpeg 并解析 `-progress` 进度输出
+- 光盘抓取由 Rust 侧车调用 freemkv-engine 完成读盘与无损封装，FFmpeg 负责后续转码
 - 渲染进程通过 preload 的 contextBridge 访问受限 IPC API（contextIsolation 开启）
 
 ## 许可证

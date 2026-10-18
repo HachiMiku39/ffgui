@@ -6,6 +6,7 @@
     clip: '音视频截取',
     crop: '画面裁剪',
     record: '屏幕录制',
+    disc: '光盘抓取',
   };
 
   const homeView = document.getElementById('home-view');
@@ -34,6 +35,10 @@
     }
     if (feature === 'record') {
       window.location.href = 'record.html';
+      return;
+    }
+    if (feature === 'disc') {
+      window.location.href = 'disc.html';
       return;
     }
     const name = FEATURE_NAMES[feature];

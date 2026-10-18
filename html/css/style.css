@@ -129,6 +129,7 @@ body {
 .icon-clip    { background: linear-gradient(135deg, #e17055, #fdcb6e); }
 .icon-crop    { background: linear-gradient(135deg, #0984e3, #74b9ff); }
 .icon-record  { background: linear-gradient(135deg, #e84393, #fd79a8); }
+.icon-disc    { background: linear-gradient(135deg, #6c5ce7, #a29bfe); }
 
 .card-title {
   font-size: 18px;

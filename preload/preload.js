@@ -43,6 +43,20 @@ contextBridge.exposeInMainWorld('ffgui', {
   // 抓帧截图（主进程弹保存对话框，ffmpeg 从原文件抓一帧 PNG）
   captureFrame: (payload) => ipcRenderer.invoke('ffgui:captureFrame', payload),
 
+  // 光盘抓取（ISO / 已提取目录 / 物理光驱；Rust 侧车探测抓取，内部 FFmpeg 转码）
+  // 选轨语义：null/缺省=保留全部，显式 []=一条都不保留，非空数组=只保留指定轨
+  discPickSource: (kind) => ipcRenderer.invoke('ffgui:disc-pick-source', kind),
+  discPickKeydb: () => ipcRenderer.invoke('ffgui:disc-pick-keydb'),
+  discListDrives: () => ipcRenderer.invoke('ffgui:disc-list-drives'),
+  discProbe: (source) => ipcRenderer.invoke('ffgui:disc-probe', source),
+  discStart: (job) => ipcRenderer.invoke('ffgui:disc-start', job),
+  discCancel: (jobId) => ipcRenderer.invoke('ffgui:disc-cancel', jobId),
+  onDiscEvent: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('ffgui:disc-event', listener);
+    return () => ipcRenderer.removeListener('ffgui:disc-event', listener);
+  },
+
   // 屏幕录制（渲染进程 getDisplayMedia + MediaRecorder 采集编码，分块写入主进程）
   recordPickOutput: () => ipcRenderer.invoke('ffgui:recordPickOutput'),
   // 开始写盘：主进程显式创建输出文件流（同路径在录则报错，杜绝截断文件）

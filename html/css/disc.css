@@ -1,0 +1,219 @@
+/* ---------- 光盘抓取页 ---------- */
+
+.disc-view {
+  max-width: 900px;
+}
+
+/* 来源选择行：ISO / 目录 / 光驱下拉 */
+.disc-source-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.disc-drive {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.disc-drive label {
+  font-size: 13px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.disc-drive select {
+  max-width: 260px;
+  padding: 7px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--text);
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  outline: none;
+}
+
+.disc-drive select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* 当前来源显示 */
+.disc-source-current {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 8px 10px;
+  font-size: 13px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.disc-source-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.disc-keydb-item {
+  margin-top: 12px;
+}
+
+/* 光盘整体信息（格式 / 卷标 / 加密） */
+.disc-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+  font-size: 12px;
+}
+
+.disc-meta-tag {
+  padding: 2px 10px;
+  border-radius: 6px;
+  background: var(--hover-bg);
+  color: var(--text-secondary);
+}
+
+.disc-meta-tag.encrypted {
+  background: var(--error-bg);
+  color: var(--danger);
+}
+
+/* 标题列表 */
+.disc-title-list {
+  list-style: none;
+  max-height: 460px;
+  overflow-y: auto;
+}
+
+.disc-title {
+  padding: 12px 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.disc-title:last-child {
+  border-bottom: none;
+}
+
+.disc-title-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.disc-title-head input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.disc-title-name {
+  font-weight: 600;
+}
+
+.disc-title-meta {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.disc-title-state {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.disc-title-state.running {
+  color: var(--accent);
+}
+
+.disc-title-state.done {
+  color: var(--accent);
+}
+
+.disc-title-state.error {
+  color: var(--danger);
+}
+
+/* 单个标题内的音轨 / 字幕勾选 */
+.disc-tracks {
+  margin: 8px 0 0 25px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 4px 24px;
+}
+
+.disc-track-group {
+  font-size: 12px;
+}
+
+.disc-track-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  color: var(--text-secondary);
+}
+
+.disc-track-group-head .disc-track-bulk {
+  display: flex;
+  gap: 6px;
+}
+
+.disc-track-bulk .btn {
+  padding: 1px 8px;
+  font-size: 11px;
+}
+
+.disc-track-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  padding: 2px 0 6px;
+}
+
+.disc-track {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  cursor: pointer;
+  user-select: none;
+}
+
+.disc-track input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.disc-track-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.disc-track-empty {
+  padding: 2px 0 6px;
+  color: var(--text-secondary);
+}
+
+/* 输出方式 / MP4 字幕警示 */
+.disc-warning {
+  color: var(--danger);
+  font-weight: 600;
+}

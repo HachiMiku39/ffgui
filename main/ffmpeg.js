@@ -457,6 +457,8 @@ function buildArgs(job, input, outPath, probe = {}) {
   for (const cover of covers) args.push('-map', `0:${cover.index}`);
   args.push('-map_metadata', job.preserveMetadata === false ? '-1' : '0');
   if (job.preserveMetadata === false) args.push('-map_metadata:s:a', '-1');
+  // 仅供主进程内部任务显式启用；普通转码任务的默认行为不变。
+  if (job.preserveChapters === true) args.push('-map_chapters', '0');
   if (job.format === 'mp3') args.push('-id3v2_version', String(job.id3Version || 3));
   // MKV 同时保留字幕及字体附件；其他容器不盲目复制可能不兼容的附加流。
   if (!audioOnly && !videoOnly && job.vcodec !== 'none') {
@@ -744,6 +746,12 @@ async function convertOne(job, input, index, send, outPath) {
     send,
     taskName: '转换',
   });
+}
+
+// 主进程内部单文件转换入口：光盘等任务可直接复用，不新增渲染层 IPC。
+async function runSingleFileConversion({ job, input, output, send = () => {} }) {
+  cancelled = false;
+  return convertOne(job, input, 0, send, output);
 }
 
 async function runJob(sender, job) {
@@ -1357,4 +1365,4 @@ function registerIpc() {
   });
 }
 
-module.exports = { registerIpc, getCapabilities };
+module.exports = { registerIpc, getCapabilities, runSingleFileConversion, cancelCurrentTask };

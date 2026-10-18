@@ -4,9 +4,9 @@ const path = require('path');
 function createWindow() {
   const win = new BrowserWindow({
     width: 1080,
-    height: 720,
+    height: 860,
     minWidth: 900,
-    minHeight: 600,
+    minHeight: 700,
     autoHideMenuBar: true,
     backgroundColor: '#f5f6fa',
     // Windows 任务栏/标题栏图标用 ICO 更可靠；其他平台用 PNG
@@ -37,6 +37,8 @@ function createWindow() {
 app.whenReady().then(() => {
   // 注册 ffmpeg 能力探测 / 文件选择 / 转换任务等 IPC
   require('./main/ffmpeg').registerIpc();
+  // 光盘抓取：Rust 侧车 + 内部 FFmpeg 转码编排
+  require('./main/disc').registerDiscIpc();
   // 主题：先应用持久化设置（nativeTheme.themeSource），再注册切换 IPC
   const theme = require('./main/theme');
   theme.initTheme();

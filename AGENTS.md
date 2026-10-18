@@ -4,7 +4,7 @@
 
 ## 项目概览
 
-FFGui 是一个基于 Electron 的桌面音视频工具箱（GUI for FFmpeg），个人开源项目（LGPL-3.0-or-later），界面语言为简体中文。已实现五个功能：「音视频转码」「音视频合并」「音视频截取」（无损切 + 抓帧截图）「画面裁剪」（单文件可视化画框）「屏幕录制」。
+FFGui 是一个基于 Electron 的桌面音视频工具箱（GUI for FFmpeg），个人开源项目（LGPL-3.0-or-later），界面语言为简体中文。已实现六个功能：「音视频转码」「音视频合并」「音视频截取」（无损切 + 抓帧截图）「画面裁剪」（单文件可视化画框）「屏幕录制」「光盘抓取」。
 
 应用通过项目内置的 ffmpeg 执行实际处理：主进程负责探测 ffmpeg 能力（硬件加速 / 编码器 / 封装格式）并缓存、弹文件对话框、spawn ffmpeg 子进程并解析其 `-progress` 输出；渲染进程为纯静态 HTML/CSS/JS 页面。屏幕录制的采集与编码在渲染进程完成（系统选择器 + MediaRecorder），仅结果转 MP4 时走 ffmpeg。
 
@@ -20,9 +20,25 @@ FFGui 是一个基于 Electron 的桌面音视频工具箱（GUI for FFmpeg）�
 
 ```
 index.js            主进程入口：创建 BrowserWindow（1080x720，contextIsolation: true，
-                    nodeIntegration: false），app ready 后调用 main/ffmpeg.registerIpc()
-                    与 main/theme（initTheme 应用持久化主题 + registerThemeIpc）；
-                    开发模式自动开 DevTools，打包后拦截 devtools-opened 强制关闭
+                    nodeIntegration: false），app ready 后依次调用 main/ffmpeg.registerIpc()、
+                    main/disc.registerDiscIpc() 与 main/theme（initTheme 应用持久化主题 +
+                    registerThemeIpc）；开发模式自动开 DevTools，打包后拦截
+                    devtools-opened 强制关闭
+main/disc.js        光盘抓取主进程编排（Rust 侧车 + 内部 FFmpeg 转码）：
+                    - registerDiscIpc() 注册 ffgui:disc-pick-source / disc-pick-keydb /
+                      disc-list-drives / disc-probe / disc-start / disc-cancel，
+                      事件通道 ffgui:disc-event；同一时间只允许一个 disc 任务
+                    - Rust 侧车（native/ffgui-disc）经 main/disc-sidecar.js 的 NDJSON
+                      协议通信（stdin/stdout 一行一个 JSON，stdout 只发事件），
+                      每次只处理一个标题；选轨语义 null=全部、[]=不保留、非空=指定轨
+                    - 无损 MKV 模式侧车直接写最终输出；转码模式先写任务唯一临时
+                      MKV 再经 runSingleFileConversion（main/ffmpeg.js 内部接口，
+                      preserveChapters 保留章节）转最终文件，临时文件在所有终态清理
+                    - 输出路径预分配防覆盖（含 .ffgui-partial 避让），取消经
+                      sidecar.cancel / cancelCurrentTask 分阶段处理
+                    - MP4 模式强制 AAC 且每个标题必须显式选择不保留字幕（防静默丢轨）
+main/disc-sidecar.js NDJSON 协议客户端：spawn 侧车、stdout 分帧/粘包、终态
+                    （result/error）判定、cancel 宽限+强制 kill、stderr 有界诊断
 main/theme.js       主题设置：持久化用户选择（system/light/dark）到
                     userData/config.json 的 theme 字段，经 nativeTheme.themeSource
                     强制 prefers-color-scheme 全局生效；IPC：ffgui:theme-get /
@@ -164,8 +180,11 @@ preload/preload.js  通过 contextBridge 暴露 window.ffgui（platform、versio
                     makePreview、captureFrame、recordPickOutput、recordStart、
                     recordWriteChunk、recordFinish、recordDiscard、recordRemux、
                     getDesktopSources、prepareDesktopSource、pathToFileUrl、
-                    getTheme、setTheme、onThemeChanged）
+                    getTheme、setTheme、onThemeChanged、discPickSource、discPickKeydb、
+                    discListDrives、discProbe、discStart、discCancel、onDiscEvent）
 html/index.html     首页（功能导航卡片 + "清除硬件信息缓存"按钮）
+html/disc.html      光盘抓取页（来源选择、标题/章节/音轨/字幕选择、输出设置、
+                    进度与取消；CSP 同首页不额外放行 media-src/img-src）
 html/convert.html   转码页
 html/merge.html     合并页（队列拖动排序、混合队列黑屏段拼接、可拖入一个字幕文件）
 html/clip.html      截取页（CSP 额外放行 media-src blob: file: 以播放本地文件）
@@ -229,7 +248,15 @@ test_media/         手工测试用的示例音视频文件（不进入安装包
 _cdp_debug.js       开发调试脚本（CDP 连 Electron 渲染进程观察 video 加载状态，
                     依赖 ws（未列入 package.json，需另行 npm i ws），
                     属一次性调试工具，不参与正常运行）
-forge.config.js     Electron Forge 配置（含压缩钩子与 Fuses）
+forge.config.js     Electron Forge 配置（含压缩钩子与 Fuses）；extraResource 已扩展
+                    携带 bin/disc/ 目录（Rust 侧车二进制 ffgui-disc.exe，不进 asar，
+                    打包后在 resources/disc/ffgui-disc.exe）
+native/ffgui-disc/  Rust 光盘抓取侧车（cargo crate，调用 freemkv-engine v1.8.4，
+                    [patch.crates-io] 固定上游 git tag）：支持 ISO / 已解密目录
+                    probe + 单标题无损 MKV rip，物理光驱代码已接入但**未真机验证**，
+                    keydbPath 可选本地密钥库（在线密钥服务禁用）。构建产物在
+                    target/release/ffgui-disc.exe；打包时复制到 bin/disc/ 由
+                    extraResource 分发。选轨三态：null=全部、[]=不保留、非空=指定轨
 makers/nsis.js      本地 Electron Forge maker：Windows 安装包（NSIS）适配层，
                     实际编译逻辑在 scripts/build-installer.cjs；
                     配置里必须 new 实例传入（Forge 凭 __isElectronForgeMaker 识别）
@@ -267,17 +294,19 @@ tools/nsisbi/       NSISBI（NSIS 解除 2GB 限制分支）免安装 amd64 版�
 `.github/workflows/build.yml`（workflow_dispatch 手动触发或发布 Release 时触发）：
 
 - Windows x64 任务：从 GyanD/codexffmpeg 的 GitHub 最新 release 下载 full_build.7z（gyan.dev
-  直链在 CI 上会被反爬拦截），取 `ffmpeg.exe` 放入 `bin/`，`npm ci` + `npm run package`，
+  直链在 CI 上会被反爬拦截），取 `ffmpeg.exe` 放入 `bin/`；同时用 dtolnay/rust-toolchain
+  构建 Rust 光盘侧车并复制为 `bin/disc/ffgui-disc.exe`；`npm ci` + `npm run package`，
   再经 `scripts/build-installer.cjs`（见上）生成 NSIS 安装包；`FFGui-windows-x64.7z` 与
   `FFGui-<版本>-x64-Setup.exe` 均上传 artifact；Release 触发时同时上传到 Release Assets
 - Windows arm64 任务：从 tordona/ffmpeg-win-arm64 最新 release 下载 full-static-win-arm64.7z，
-  同样取 `ffmpeg.exe` 放入 `bin/`；x64 runner 无法执行 arm64 二进制，改为校验 PE 头机器类型
-  （0xAA64）；`npm run package -- --arch=arm64` 交叉打包（无原生依赖，可直接交叉），
-  产物为 `FFGui-windows-arm64.7z` + `FFGui-<版本>-arm64-Setup.exe`（NSIS 安装器
-  架构无关，由 x64 makensis 交叉编译 arm64 内容）
+  同样取 `ffmpeg.exe` 放入 `bin/`；安装 Rust ARM64 target，加载 MSVC ARM64 环境并准备
+  clang（ring 的 ARM64 汇编需要），`cargo build --target aarch64-pc-windows-msvc` 产出
+  `bin/disc/ffgui-disc.exe`，校验 PE 头机器类型（0xAA64）；x64 runner 无法执行 arm64
+  二进制；`npm run package -- --arch=arm64` 交叉打包，产物为 `FFGui-windows-arm64.7z` +
+  `FFGui-<版本>-arm64-Setup.exe`（NSIS 安装器架构无关，由 x64 makensis 交叉编译 arm64 内容）
 - macOS 任务：下载 kisaragychihaya/ffmpeg_build_mac 最新 release 的 macos-arm64-static
-  tar.gz，`bin/` 与 `lib/` 原样放入项目 `bin/` 并 `chmod +x`，打包后用 ditto 压缩为
-  `FFGui-macos-arm64.zip`；Release 触发时同样上传
+  tar.gz，`bin/` 与 `lib/` 原样放入项目 `bin/` 并 `chmod +x`；用 cargo 构建 Rust 侧车到
+  `bin/disc/ffgui-disc`；打包后用 ditto 压缩为 `FFGui-macos-arm64.zip`；Release 触发时同样上传
 - 仓库本身不提交 `bin/ffmpeg.exe` 等大文件，CI 每次现下；NSISBI 编译器同样不入库，
   由 build-installer.cjs 在构建时从 v0.1 Release 资源下载解压
 
@@ -321,12 +350,21 @@ tools/nsisbi/       NSISBI（NSIS 解除 2GB 限制分支）免安装 amd64 版�
 - 录屏限制：系统声音走 'loopback' 回环，仅 Windows 支持（Electron 文档明确；
   macOS/Linux 无系统级回环，只能录麦克风）；MediaRecorder 画质只能控码率
   （无 CRF），帧率跟随屏幕；录屏与转码等任务沿用全局单任务假设（页面隔离保证不并发）
+- 光盘抓取限制：物理光驱代码已接入（open_scan/DiscSession）但**未真机验证**，
+  本机无光驱；AACS keydb 需用户自备本地 KEYDB.cfg，在线密钥服务禁用；
+  BD+ 盘未验证；`bin/disc/ffgui-disc.exe`（约 11MB）随 extraResource 分发，
+  三个 CI 平台均先构建对应架构的 Rust 侧车再打包；
+  freemkv-unlock 内含非 MIT 的厂商驱动微码，分发时须随附上游 LICENSES/NOTICE
 
 ## 测试方式
 
-自动化回归使用 `npm test`，生成独立临时媒体并自动清理。手工验证方式：`npm start` 启动应用，使用 `test_media/` 下的示例文件走一遍
-转码流程（含拖拽添加、取消、进度显示），并在主进程控制台观察 `[ffgui]` / `[ffmpeg]` 日志；
-录屏页验证录制（含系统声音 / 麦克风勾选、取消清理半成品、结果转 MP4）。
+自动化回归使用 `npm test`，生成独立临时媒体并自动清理；侧车/页面专项用
+`node --test scripts/disc.test.cjs scripts/disc-sidecar.test.cjs scripts/disc-ui.test.cjs`，
+Rust 侧车用 `cd native/ffgui-disc && cargo test --locked`。手工验证方式：`npm start`
+启动应用，使用 `test_media/` 下的示例文件走一遍转码流程（含拖拽添加、取消、进度显示），
+并在主进程控制台观察 `[ffgui]` / `[ffmpeg]` 日志；录屏页验证录制（含系统声音 /
+麦克风勾选、取消清理半成品、结果转 MP4）；光盘页验证 ISO 镜像或已提取目录的
+探测、选轨、抓取与取消（需真实光盘环境）。
 
 ## 音轨与输出规则（修复后）
 

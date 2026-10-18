@@ -1,0 +1,30 @@
+[package]
+name = "ffgui-disc"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "FFGui DVD/BD 光盘抓取侧车进程：NDJSON 协议，底层调用 freemkv-engine"
+license = "MIT"
+
+[[bin]]
+name = "ffgui-disc"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+freemkv-engine = "1.8"
+libfreemkv = "1.8"
+
+[dev-dependencies]
+# 仅测试用：构造可扫描的合成 BD 镜像（合成媒体验证，不含任何真实光盘密钥）。
+libfreemkv = { version = "1.8", features = ["test-util"] }
+tempfile = "3"
+
+# freemkv 的三个 crate 均不在 crates.io 上，必须由 workspace 根的 [patch.crates-io]
+# 指向固定的 git tag（v1.8.4 = 上游 tag，对应 rev 见下）。
+[patch.crates-io]
+freemkv-engine = { git = "https://github.com/freemkv/freemkv-engine", tag = "v1.8.4" }
+libfreemkv = { git = "https://github.com/freemkv/libfreemkv", tag = "v1.8.4" }
+freemkv-keysources = { git = "https://github.com/freemkv/freemkv-keysources", tag = "v1.8.4" }
+freemkv-unlock = { git = "https://github.com/freemkv/freemkv-unlock", tag = "v1.8.4" }

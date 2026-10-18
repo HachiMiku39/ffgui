@@ -381,7 +381,7 @@ test('截取保留毫秒时间，跨分钟进位和小于 1 秒的区间正确',
 });
 
 test('主题：所有页面先加载 theme.js，样式与 preload 暴露主题 API', () => {
-  for (const page of ['index', 'convert', 'merge', 'clip', 'record']) {
+  for (const page of ['index', 'convert', 'merge', 'clip', 'record', 'disc']) {
     const html = fs.readFileSync(path.join(repo, `html/${page}.html`), 'utf8');
     const themeIdx = html.indexOf('js/theme.js');
     const pageIdx = html.indexOf(`js/${page}.js`);
@@ -397,10 +397,35 @@ test('主题：所有页面先加载 theme.js，样式与 preload 暴露主题 A
 });
 
 test('页面无内联 style 属性（CSP style-src \'self\' 不允许 inline）', () => {
-  for (const page of ['index', 'convert', 'merge', 'clip', 'record']) {
+  for (const page of ['index', 'convert', 'merge', 'clip', 'record', 'disc']) {
     const html = fs.readFileSync(path.join(repo, `html/${page}.html`), 'utf8');
     assert.ok(!html.includes('style="'), `${page}.html 不得含内联 style 属性`);
   }
+});
+
+test('光盘抓取：IPC 注册、preload 暴露最小 API、首页入口与侧车协议契约', () => {
+  const indexSrc = fs.readFileSync(path.join(repo, 'index.js'), 'utf8');
+  assert.match(indexSrc, /require\('\.\/main\/disc'\)\.registerDiscIpc\(\)/,
+    'index.js 须注册光盘抓取 IPC');
+
+  const preload = fs.readFileSync(path.join(repo, 'preload/preload.js'), 'utf8');
+  for (const name of ['discPickSource', 'discPickKeydb', 'discListDrives', 'discProbe',
+    'discStart', 'discCancel', 'onDiscEvent']) {
+    assert.match(preload, new RegExp(`${name}:`), `preload 须暴露 ${name}`);
+  }
+  // 渲染层不得直接接触侧车子进程或内部取消
+  assert.ok(!preload.includes('createDiscSidecar'), 'preload 不得暴露侧车工厂');
+  assert.ok(!preload.includes('spawn'), 'preload 不得暴露 spawn');
+
+  const indexHtml = fs.readFileSync(path.join(repo, 'html/index.html'), 'utf8');
+  assert.match(indexHtml, /data-feature="disc"/, '首页须有光盘抓取入口');
+  const indexJs = fs.readFileSync(path.join(repo, 'html/js/index.js'), 'utf8');
+  assert.match(indexJs, /disc\.html/, '首页跳转须指向 disc.html');
+
+  // 侧车协议契约：选轨三态与终态事件不可被静默破坏
+  const sidecar = fs.readFileSync(path.join(repo, 'main/disc.js'), 'utf8');
+  assert.match(sidecar, /'FFGUI_DISC_SIDECAR_NOT_FOUND'/, '须对侧车缺失给出明确错误');
+  assert.match(sidecar, /titleFingerprint/, '抓取须传标题指纹校验');
 });
 
 test('主题：主进程持久化设置、拒绝非法值并向所有窗口广播', () => {
