@@ -2,7 +2,9 @@
 
 本功能基于 [FFGui v0.6.0](https://github.com/kisaragychihaya/ffgui/releases/tag/v0.6.0) 增加独立的 DSD 转 PCM 页面。功能分支为 `feat/dsd-pcm-adaptive`，保留项目版本号 `0.6.0`，由上游维护者决定合并与后续正式版本。
 
-本文中的默认选率属于本项目的产品策略；工具、文件格式和信号处理事实另列官方参考资料。测试与打包由 GitHub Actions 完成，验证状态见文末。
+本文中的默认选率属于本项目的产品策略；工具、文件格式和信号处理事实另列官方参考资料。依赖安装、真实媒体测试、Rust 编译及 Electron 打包均由 GitHub Actions 完成，本地只进行源码编辑和静态检查。
+
+交接验证日期：**2026-10-18 UTC**。最终通过的代码与构建配置提交为 [`f5e2fd6fba93a817216c337dc1cf33162660baab`](https://github.com/HachiMiku39/ffgui/commit/f5e2fd6fba93a817216c337dc1cf33162660baab)，对应 [GitHub Actions run 39108886218](https://github.com/HachiMiku39/ffgui/actions/runs/39108886218)，四个 job 全部成功。之后的交接提交仅更新本文，不改变已验证的应用代码或构建配置，也不重复触发编译。
 
 ## 功能范围
 
@@ -111,6 +113,7 @@ DSD 任务持有共享任务占用标记，覆盖探测、峰值扫描及最终�
 | `html/dsd.html`、`html/js/dsd.js`、`html/css/dsd.css` | 独立 DSD 页面、批量队列、表单、预期输出及任务状态 |
 | `scripts/dsd.test.cjs` | DSD 文件头、参数、真实 FFmpeg 转换及任务管理验证 |
 | `scripts/dsd-ui.test.cjs` | DSD 页面行为与受限接口回归 |
+| `scripts/verify-package.cjs` | 云端检查 ASAR 中的 DSD 文件与下载缓存隔离 |
 | `.github/workflows/dsd-check.yml` | Node 22 与 FFmpeg 云端验证，可被打包工作流复用 |
 | `.github/workflows/build.yml` | 验证通过后构建 Windows x64、Windows ARM64、macOS ARM64 产物 |
 | `docs/dsd-pcm.md` | 默认转换规则、功能边界与交接说明 |
@@ -173,33 +176,92 @@ Ubuntu 24.04 的默认 FFmpeg 6.1 无法执行上游已使用的 `scale=reset_sa
 
 Windows x64 与 macOS 在打包前运行 `node --test scripts/dsd.test.cjs`，`FFMPEG` / `FFPROBE` 指向该平台刚下载的二进制。Windows 的 ffprobe 仅从展开包中引用，不复制进安装包；macOS 使用原有下载布局中的 `bin/bin/ffprobe`。专项失败则停止该平台打包，不重复运行全部旧功能回归。
 
-| 目标 | Actions artifact | 内容 |
-|---|---|---|
-| Windows x64 | `FFGui-windows-x64` | `FFGui-windows-x64.7z` |
-| Windows x64 安装包 | `FFGui-windows-x64-Setup` | `FFGui-0.6.0-x64-Setup.exe` |
-| Windows ARM64 | `FFGui-windows-arm64` | `FFGui-windows-arm64.7z` |
-| Windows ARM64 安装包 | `FFGui-windows-arm64-Setup` | `FFGui-0.6.0-arm64-Setup.exe` |
-| macOS ARM64 | `FFGui-macos-arm64` | `FFGui-macos-arm64.zip` |
+三平台的 FFmpeg 下载压缩包与解压目录均放在 GitHub runner 的临时目录，避免误装入应用。打包后由 `scripts/verify-package.cjs` 读取 ASAR 目录元数据，要求后端、页面、页面脚本和样式这四个 DSD 文件存在且非空，并拒绝混入下载缓存或 FFmpeg / ffprobe 二进制。该检查不启动 Electron；应用需要的 FFmpeg 仍按上游约定作为外部资源提供。
+
+以下五份产物均来自上述成功 run，且对应同一个已验证提交。链接下载的是 GitHub Actions 外层 ZIP，解压后取得表中应用文件；大小也按外层 ZIP 计。
+
+| 目标 | Actions artifact 下载 | 内容 | 大小 |
+|---|---|---|---:|
+| Windows x64 便携版 | [FFGui-windows-x64](https://github.com/HachiMiku39/ffgui/actions/runs/39108886218/artifacts/12130180163) | `FFGui-windows-x64.7z` | 140.68 MiB |
+| Windows x64 安装包 | [FFGui-windows-x64-Setup](https://github.com/HachiMiku39/ffgui/actions/runs/39108886218/artifacts/12129199760) | `FFGui-0.6.0-x64-Setup.exe` | 149.57 MiB |
+| Windows ARM64 便携版 | [FFGui-windows-arm64](https://github.com/HachiMiku39/ffgui/actions/runs/39108886218/artifacts/12129284086) | `FFGui-windows-arm64.7z` | 104.08 MiB |
+| Windows ARM64 安装包 | [FFGui-windows-arm64-Setup](https://github.com/HachiMiku39/ffgui/actions/runs/39108886218/artifacts/12129239530) | `FFGui-0.6.0-arm64-Setup.exe` | 119.93 MiB |
+| macOS ARM64 | [FFGui-macos-arm64](https://github.com/HachiMiku39/ffgui/actions/runs/39108886218/artifacts/12129124369) | `FFGui-macos-arm64.zip` | 222.17 MiB |
+
+五份应用产物的当前到期时间均为 **2027-01-16 07:45:48 UTC**。交接后需要长期分发时，可由维护者下载保留或通过正式 Release 发布。
+
+GitHub API 返回的外层 artifact ZIP SHA-256 如下。它们用于核对下载的外层 ZIP，**不是**内部 `.exe`、`.7z` 或应用 `.zip` 文件的摘要。
+
+```text
+FFGui-windows-x64         ac976f7f5cf8c1d7ea0f647ab6643a5d10333fbb4387a061445f5cb10ba8c1d6
+FFGui-windows-x64-Setup   c77c9c8d53404790dd636471204d05fb80dd635681021c9f8945ddcb42c1540b
+FFGui-windows-arm64       ca73eb9bf7b407eba7575ea25fd9292656b7e5e2064a3cb696298d0fad3118e1
+FFGui-windows-arm64-Setup dba2b876e7dac56109aec61110f2c12ed51cd95f6cec118e2b519b2a53d19684
+FFGui-macos-arm64         07a2add6888038963e6dd1a563729a5f85da1e55c5c2f63485c1b731cb9fd6a4
+```
 
 Windows ARM64 使用交叉构建并验证 PE 架构，不将 x64 runner 上的编译结果称为 ARM64 真机运行验证。macOS 包沿用现有分发方式，应用启动与 DAC 播放仍需实机验证。
 
 功能分支 push 与手动构建仅上传 Actions artifacts。工作流不会替维护者创建正式 Release；既有 `release: published` 事件的 Release Assets 上传逻辑保留。
 
+## 原作者获取与审阅
+
+- 源码分支：[HachiMiku39/ffgui · feat/dsd-pcm-adaptive](https://github.com/HachiMiku39/ffgui/tree/feat/dsd-pcm-adaptive)。
+- 基于 v0.6.0 的完整差异：[查看修改](https://github.com/HachiMiku39/ffgui/compare/b5f9feceafc83dd345598a890e4f3e8255fda4e6...feat/dsd-pcm-adaptive)。
+- 基线提交：`b5f9feceafc83dd345598a890e4f3e8255fda4e6`。
+
+在已有上游源码仓库中，可以先建立独立审阅分支：
+
+```bash
+git fetch https://github.com/HachiMiku39/ffgui.git feat/dsd-pcm-adaptive
+git switch -c review/dsd-pcm FETCH_HEAD
+```
+
+功能分支保留 `0.6.0` 版本号；合并、正式版本命名与 Release 发布由原作者决定。默认选率、固定约 30 kHz 低通及真实 DST / 设备验证范围是交接时需要明确的设计选择。
+
 ## 验证范围与状态
 
-以下为本次交接的验收项目。合成数据验证结果以对应提交的 GitHub Actions 日志为准，文档初始状态列为待 CI 确认，不预先宣称通过。
+以下结果均取自 [最终成功 run](https://github.com/HachiMiku39/ffgui/actions/runs/39108886218) 及其 job 日志，验证提交为 `f5e2fd6fba93a817216c337dc1cf33162660baab`。
+
+### 自动化结果
+
+| 任务 | 实际结果 | 日志 |
+|---|---|---|
+| Ubuntu 音视频回归 | 37 / 37 通过，0 跳过 | [checks / check](https://github.com/HachiMiku39/ffgui/actions/runs/39108886218/job/117620533563) |
+| Ubuntu 光盘任务、协议及页面回归 | 59 / 59 通过，0 跳过 | [checks / check](https://github.com/HachiMiku39/ffgui/actions/runs/39108886218/job/117620533563) |
+| Ubuntu DSD 后端及页面回归 | 24 / 24 通过，0 跳过；后端 14 项、页面 10 项 | [checks / check](https://github.com/HachiMiku39/ffgui/actions/runs/39108886218/job/117620533563) |
+| Windows x64 随包 FFmpeg DSD 专项 | 14 / 14 通过，0 跳过；打包及两份产物上传成功 | [windows](https://github.com/HachiMiku39/ffgui/actions/runs/39108886218/job/117620626472) |
+| macOS ARM64 随包 FFmpeg DSD 专项 | 14 / 14 通过，0 跳过；打包及产物上传成功 | [macos](https://github.com/HachiMiku39/ffgui/actions/runs/39108886218/job/117620626427) |
+| Windows ARM64 交叉构建 | Rust 侧车及 FFmpeg 的 PE 架构检查通过；打包及两份产物上传成功 | [windows-arm64](https://github.com/HachiMiku39/ffgui/actions/runs/39108886218/job/117620626400) |
+| 三平台 ASAR 内容检查 | 全部通过：4 个 DSD 必要文件存在且非空，无误装入的 FFmpeg 下载缓存或二进制 | 上述三个平台 job |
+
+Ubuntu 合计 **120 / 120** 项通过。Windows x64 与 macOS 的 14 项专项分别再次运行相同 DSD 后端测试，用于验证各自随包二进制，不作为新增的独立测试覆盖数量。
+
+实际工具版本按日志记录：
+
+| 环境 | Node.js | FFmpeg |
+|---|---|---|
+| Ubuntu 检查 | `v22.23.3` | `n9.0.2-17-g2a571b6068-20260930`，固定下载 SHA-256 核对通过 |
+| Windows x64 | `v22.23.3` | `9.0.2-full_build-www.gyan.dev` |
+| macOS ARM64 | `v22.23.3` | 二进制实际报告 `9.0`；下载来源的 release 标签为 `v9.0.2` |
+| Windows ARM64 | 云端交叉构建 | 使用 `ffmpeg-master-latest-full-static-win-arm64.7z`，通过 PE 架构检查；未执行 ARM64 二进制报告运行版本 |
+
+Ubuntu 的工具版本及三个测试组日志也可下载：[dsd-check-39108886218-1](https://github.com/HachiMiku39/ffgui/actions/runs/39108886218/artifacts/12129617386)，该日志 artifact 当前到期时间为 **2026-11-01 07:46:16 UTC**。
+
+### 覆盖范围与人工验收边界
 
 | 范围 | 验证方式 | 当前状态 |
 |---|---|---|
-| 两个采样率家族、DSD64 / 128 / 256 / 512 识别与默认映射 | 合成 DSF / DFF、头部解析回归 | 待 CI 确认 |
-| WAV 24-bit / 32-bit float、FLAC 24-bit 实际输出 | 真实 FFmpeg 转换、ffprobe 检查 | 待 CI 确认 |
-| 声道、标签、封面 | 合成媒体与输出探测 | 待 CI 确认 |
-| 无效输入、参数白名单、输出防覆盖、峰值与取消 | Node 回归及合成媒体 | 待 CI 确认 |
-| DSD 页面与 preload 调用约束 | Node 页面逻辑回归 / 静态检查 | 待 CI 确认 |
-| 既有音视频与光盘功能 | 原有 Node 回归脚本 | 待 CI 确认 |
-| Windows x64 / macOS 实际随包 FFmpeg 的 DSD 专项 | 对下载二进制执行 DSD 测试 | 待 CI 确认 |
-| 三平台安装包 / 压缩包 | GitHub Actions 构建 | 待 CI 确认 |
-| 真实专辑、各种来源的 DFF / DST、完整 Electron GUI | 手工导入、批量操作与听音 | 尚未人工验证 |
+| 两个采样率家族、DSD64 / 128 / 256 / 512 识别与默认映射 | 合成 DSF / DFF、头部解析回归 | 通过 |
+| WAV 24-bit / 32-bit float、FLAC 24-bit 实际输出 | 真实 FFmpeg 转换、ffprobe 检查 | 通过 |
+| 声道、标签、封面、声道间串扰、低通效果 | 合成媒体、频率投影及输出探测 | 通过 |
+| 无效输入、参数白名单、输出防覆盖、峰值与取消 | Node 回归及合成媒体 | 通过 |
+| DSD 页面与 preload 调用约束 | Node VM / 模拟 DOM 页面逻辑回归及静态检查 | 通过；不等同完整 Electron GUI 验收 |
+| 既有音视频与光盘功能 | 原有 Node 回归脚本 | 37 / 37 与 59 / 59 通过 |
+| Windows x64 / macOS 实际随包 FFmpeg 的 DSD 专项 | 对下载二进制执行 DSD 测试 | 各 14 / 14 通过 |
+| 三平台安装包 / 压缩包 | GitHub Actions 构建及 ASAR 内容检查 | 全部通过，共 5 份应用产物 |
+| DST 压缩 DFF | 合成头部解析 | 仅解析验证通过；尚无真实压缩音频解码样本验证 |
+| 真实专辑、各种来源的 DSF / DFF、完整 Electron GUI | 手工导入、批量操作与听音 | 尚未人工验证 |
 | 真实 DAC、多声道播放设备、Windows ARM64 真机 | 实机启动与播放 | 尚未实机验证 |
 
 合成短文件可以检验解码路径、格式字段和任务行为，不能代表对全部音乐母带、全部元数据写法、所有 DAC 或主观音质完成验证。
