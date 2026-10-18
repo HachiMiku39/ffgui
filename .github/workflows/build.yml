@@ -66,9 +66,15 @@ jobs:
           $asset = $rel.assets | Where-Object { $_.name -match 'full_build\.7z$' } | Select-Object -First 1
           if (-not $asset) { throw 'codexffmpeg 最新 release 中未找到 full_build.7z' }
           Write-Host "下载 $($asset.name)"
-          curl.exe -L -o ffmpeg.7z $asset.browser_download_url
-          7z x ffmpeg.7z | Out-Null
-          $exe = Get-ChildItem -Recurse -Filter ffmpeg.exe |
+          # 下载与展开目录放到工作区外，避免缓存及 ffprobe 被打入 app.asar。
+          $ffmpegWork = Join-Path $env:RUNNER_TEMP 'ffgui-ffmpeg-x64'
+          $ffmpegArchive = Join-Path $ffmpegWork 'ffmpeg.7z'
+          New-Item -ItemType Directory -Force $ffmpegWork | Out-Null
+          curl.exe --fail --show-error --location --retry 3 -o $ffmpegArchive $asset.browser_download_url
+          if ($LASTEXITCODE -ne 0) { throw '下载 ffmpeg 压缩包失败' }
+          7z x $ffmpegArchive "-o$ffmpegWork" | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw '展开 ffmpeg 压缩包失败' }
+          $exe = Get-ChildItem -Path $ffmpegWork -Recurse -Filter ffmpeg.exe |
             Where-Object { $_.FullName -like '*bin*' } | Select-Object -First 1
           if (-not $exe) { throw '压缩包中未找到 ffmpeg.exe' }
           New-Item -ItemType Directory -Force bin | Out-Null
@@ -89,6 +95,9 @@ jobs:
 
       - name: 打包
         run: npm run package
+
+      - name: 检查安装包目录
+        run: node scripts/verify-package.cjs out/FFGui-win32-x64/resources/app.asar
 
       - name: 生成 NSIS 安装包
         run: node scripts/build-installer.cjs --app-dir out/FFGui-win32-x64 --arch x64
@@ -201,9 +210,14 @@ jobs:
           $asset = $rel.assets | Where-Object { $_.name -match 'full-static-win-arm64\.7z$' } | Select-Object -First 1
           if (-not $asset) { throw 'ffmpeg-win-arm64 最新 release 中未找到 full-static-win-arm64.7z' }
           Write-Host "下载 $($asset.name)"
-          curl.exe -L -o ffmpeg.7z $asset.browser_download_url
-          7z x ffmpeg.7z | Out-Null
-          $exe = Get-ChildItem -Recurse -Filter ffmpeg.exe |
+          $ffmpegWork = Join-Path $env:RUNNER_TEMP 'ffgui-ffmpeg-arm64'
+          $ffmpegArchive = Join-Path $ffmpegWork 'ffmpeg.7z'
+          New-Item -ItemType Directory -Force $ffmpegWork | Out-Null
+          curl.exe --fail --show-error --location --retry 3 -o $ffmpegArchive $asset.browser_download_url
+          if ($LASTEXITCODE -ne 0) { throw '下载 ARM64 ffmpeg 压缩包失败' }
+          7z x $ffmpegArchive "-o$ffmpegWork" | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw '展开 ARM64 ffmpeg 压缩包失败' }
+          $exe = Get-ChildItem -Path $ffmpegWork -Recurse -Filter ffmpeg.exe |
             Where-Object { $_.FullName -like '*bin*' } | Select-Object -First 1
           if (-not $exe) { throw '压缩包中未找到 ffmpeg.exe' }
           New-Item -ItemType Directory -Force bin | Out-Null
@@ -220,6 +234,9 @@ jobs:
 
       - name: 打包（arm64）
         run: npm run package -- --arch=arm64
+
+      - name: 检查安装包目录
+        run: node scripts/verify-package.cjs out/FFGui-win32-arm64/resources/app.asar
 
       - name: 生成 NSIS 安装包
         run: node scripts/build-installer.cjs --app-dir out/FFGui-win32-arm64 --arch arm64
@@ -296,11 +313,13 @@ jobs:
             | node -e "const r=JSON.parse(require('fs').readFileSync(0,'utf8'));if(r.message){console.error('GitHub API 错误：'+r.message);process.exit(1)}const a=(r.assets||[]).find(x=>/macos-arm64-static\.tar\.gz$/.test(x.name));process.stdout.write(a?a.browser_download_url:'')")
           if [ -z "$url" ]; then echo 'ffmpeg_build_mac 最新 release 中未找到 macos-arm64-static tar.gz'; exit 1; fi
           echo "下载 $url"
-          curl -L -o ffmac.tar.gz "$url"
-          mkdir -p ffmac
-          tar xzf ffmac.tar.gz -C ffmac
+          # 原下载树留在 RUNNER_TEMP，只复制运行所需的 bin/ 与 lib/ 相对布局。
+          ffmpeg_work="$RUNNER_TEMP/ffgui-ffmpeg-macos"
+          mkdir -p "$ffmpeg_work"
+          curl --fail --show-error --location --retry 3 -o "$ffmpeg_work/ffmac.tar.gz" "$url"
+          tar xzf "$ffmpeg_work/ffmac.tar.gz" -C "$ffmpeg_work"
           mkdir -p bin
-          cp -R ffmac/bin ffmac/lib bin/
+          cp -R "$ffmpeg_work/bin" "$ffmpeg_work/lib" bin/
           chmod +x bin/bin/ffmpeg
           ./bin/bin/ffmpeg -version | head -1
 
@@ -317,6 +336,9 @@ jobs:
 
       - name: 打包
         run: npm run package
+
+      - name: 检查安装包目录
+        run: node scripts/verify-package.cjs out/FFGui-darwin-arm64/FFGui.app/Contents/Resources/app.asar
 
       - name: 压缩产物
         run: ditto -c -k --sequesterRsrc --keepParent out/FFGui-darwin-arm64/FFGui.app FFGui-macos-arm64.zip
