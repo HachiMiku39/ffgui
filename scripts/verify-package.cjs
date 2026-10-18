@@ -21,7 +21,8 @@ function verifyPackage(archivePath) {
 
   for (const file of requiredFiles) {
     assert.ok(included.has(file), `安装包缺少 DSD 文件：${file}`);
-    const metadata = asar.statFile(archivePath, file);
+    // asar 3.x 按 path.sep 拆分目录；传本机路径以支持 Windows 多层目录。
+    const metadata = asar.statFile(archivePath, path.normalize(file));
     assert.ok(typeof metadata.size === 'number' && metadata.size > 0,
       `安装包中的 DSD 文件为空或不是常规文件：${file}`);
   }
